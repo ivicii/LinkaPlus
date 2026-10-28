@@ -150,6 +150,22 @@ struct APIClient {
         return try await decodeObject(req, as: PaymentInfo.self)
     }
 
+    /// Create the Stripe customer (must exist before a SetupIntent).
+    func addCustomer(auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/payments_consumer/stripe/add_customer"))
+        req.httpMethod = "POST"
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
+    /// Sync the saved card to the backend (after the PaymentSheet succeeds).
+    func addCard(auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/payments_consumer/stripe/update_payment_methods"))
+        req.httpMethod = "POST"
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
     func createSetupIntent(auth: Identity) async throws -> SetupIntentData {
         var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/payments_consumer/stripe/create_setup_intent"))
         req.httpMethod = "POST"

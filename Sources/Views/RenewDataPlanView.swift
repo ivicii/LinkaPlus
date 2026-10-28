@@ -64,9 +64,10 @@ struct RenewDataPlanView: View {
         loading = true; message = nil
         do {
             let auth = session.identity()
-            async let info = api.getPaymentInfo(auth: auth)
-            async let intent = api.createSetupIntent(auth: auth)
-            let (pi, si) = try await (info, intent)
+            // Ensure a Stripe customer exists first (idempotent; ignore if present).
+            try? await api.addCustomer(auth: auth)
+            let pi = try await api.getPaymentInfo(auth: auth)
+            let si = try await api.createSetupIntent(auth: auth)
             priceDesc = pi.annual_cost_desc
             if let key = pi.stripe_publishable_key { STPAPIClient.shared.publishableKey = key }
 
@@ -92,7 +93,9 @@ struct RenewDataPlanView: View {
             case .completed:
                 Task {
                     do {
-                        try await api.enableDataPlan(serial: serial, enabled: true, auth: session.identity())
+                        let auth = session.identity()
+                        try await api.addCard(auth: auth)   // sync saved card to backend
+                        try await api.enableDataPlan(serial: serial, enabled: true, auth: auth)
                         message = "Betaald en dataplan geactiveerd. Ververs zo meteen de dataplan-status."
                         done = true
                     } catch {
