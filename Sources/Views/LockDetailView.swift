@@ -240,7 +240,8 @@ struct LockDetailView: View {
         }
         .sheet(isPresented: $showRenew) {
             if let serial = lock.serial_no {
-                RenewDataPlanView(serial: serial).environmentObject(session)
+                RenewDataPlanView(serial: serial, onActivated: { loadSim() })
+                    .environmentObject(session)
             }
         }
     }

@@ -7,6 +7,7 @@ import StripePayments
 /// presents Stripe's PaymentSheet to add a card, then enables the data plan.
 struct RenewDataPlanView: View {
     let serial: String
+    var onActivated: (() -> Void)? = nil
     @EnvironmentObject var session: SessionStore
     @Environment(\.dismiss) var dismiss
     private let api = APIClient()
@@ -96,8 +97,9 @@ struct RenewDataPlanView: View {
                         let auth = session.identity()
                         try await api.addCard(auth: auth)   // sync saved card to backend
                         try await api.enableDataPlan(serial: serial, enabled: true, auth: auth)
-                        message = "Betaald en dataplan geactiveerd. Ververs zo meteen de dataplan-status."
+                        message = "Betaald en dataplan geactiveerd."
                         done = true
+                        onActivated?()
                     } catch {
                         message = "Kaart opgeslagen, maar activeren mislukte: \((error as? LocalizedError)?.errorDescription ?? "\(error)")"
                     }
