@@ -9,6 +9,8 @@ struct DiagnosticsView: View {
 
     @State private var results: [APIClient.ProbeResult] = []
     @State private var busy = false
+    @State private var simConfirm = false
+    @State private var simBusy = false
 
     var body: some View {
         NavigationStack {
@@ -19,6 +21,18 @@ struct DiagnosticsView: View {
                     Text("userId: \(session.userId ?? "–")")
                         .font(.caption).foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                }
+
+                Section {
+                    Button(role: .destructive) { simConfirm = true } label: {
+                        HStack {
+                            if simBusy { ProgressView() }
+                            Label("SIM-/dataplan-status ophalen", systemImage: "simcard")
+                        }
+                    }
+                    .disabled(simBusy)
+                } footer: {
+                    Text("⚠︎ Roept activate_sim_consumer aan. Dit kán de SIM activeren / de dataklok starten. Alleen gebruiken als je de status écht wilt opvragen.")
                 }
                 ForEach(results) { r in
                     VStack(alignment: .leading, spacing: 4) {
@@ -36,7 +50,35 @@ struct DiagnosticsView: View {
                     Button("Sluit") { dismiss() }
                 }
             }
+            .alert("SIM-status opvragen?", isPresented: $simConfirm) {
+                Button("Annuleer", role: .cancel) {}
+                Button("Opvragen", role: .destructive) { simCheck() }
+            } message: {
+                Text("Dit roept de activate-call aan en kan de SIM activeren / je dataplan starten. Doorgaan?")
+            }
             .task { run() }
+        }
+    }
+
+    private func simCheck() {
+        simBusy = true
+        Task {
+            let auth = session.identity()
+            let locks = (try? await api.getLocks(auth: auth)) ?? []
+            let serial = locks.first?.serial_no ?? ""
+            let lat = locks.first?.latitude ?? 0
+            let lng = locks.first?.longitude ?? 0
+            let r = await api.probe(
+                label: "POST /api/leo/activate_sim_consumer",
+                method: "POST", path: "/api/leo/activate_sim_consumer",
+                form: ["lock_serial_no": serial,
+                       "latitude": String(lat),
+                       "longitude": String(lng)],
+                auth: auth)
+            await MainActor.run {
+                results.insert(r, at: 0)
+                simBusy = false
+            }
         }
     }
 
