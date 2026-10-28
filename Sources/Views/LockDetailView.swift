@@ -24,6 +24,7 @@ struct LockDetailView: View {
     @State private var sim: SimStatus?
     @State private var simLoading = false
     @State private var simError: String?
+    @State private var showRenew = false
 
     @StateObject private var loc = LocationProvider()
 
@@ -141,6 +142,11 @@ struct LockDetailView: View {
                 if let simError {
                     Text(simError).font(.caption).foregroundStyle(.secondary)
                 }
+                if lock.serial_no != nil {
+                    Button { showRenew = true } label: {
+                        Label("Dataplan verlengen", systemImage: "creditcard")
+                    }
+                }
             } header: {
                 Text("Dataplan & verbruik")
             } footer: {
@@ -231,6 +237,11 @@ struct LockDetailView: View {
         }
         .sheet(isPresented: $showBLE) {
             BLEDiagnosticsView(lockName: lock.displayName)
+        }
+        .sheet(isPresented: $showRenew) {
+            if let serial = lock.serial_no {
+                RenewDataPlanView(serial: serial).environmentObject(session)
+            }
         }
     }
 

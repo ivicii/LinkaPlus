@@ -105,6 +105,21 @@ extension Lock {
     }
 }
 
+// MARK: - Payments (Stripe) for data-plan renewal
+
+struct PaymentInfo: Decodable {
+    let annual_cost: Int?
+    let annual_cost_desc: String?
+    let stripe_publishable_key: String?
+    let stripe_user_id: String?
+}
+
+struct SetupIntentData: Decodable {
+    let clientSecret: String?
+    let customer_id: String?
+    let ephemeralKey: String?
+}
+
 // MARK: - SIM / data-plan status (from activate_sim_consumer)
 
 struct DataUsage: Decodable {

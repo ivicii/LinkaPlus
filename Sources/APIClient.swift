@@ -141,6 +141,30 @@ struct APIClient {
         return env.data?.activities ?? []
     }
 
+    // MARK: Data-plan renewal (Stripe)
+
+    func getPaymentInfo(auth: Identity) async throws -> PaymentInfo {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/payments_consumer/stripe/get_payment_info"))
+        req.httpMethod = "POST"
+        authorize(&req, auth: auth)
+        return try await decodeObject(req, as: PaymentInfo.self)
+    }
+
+    func createSetupIntent(auth: Identity) async throws -> SetupIntentData {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/payments_consumer/stripe/create_setup_intent"))
+        req.httpMethod = "POST"
+        authorize(&req, auth: auth)
+        return try await decodeObject(req, as: SetupIntentData.self)
+    }
+
+    func enableDataPlan(serial: String, enabled: Bool, auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/payments_consumer/stripe/enable_data_plan"))
+        req.httpMethod = "POST"
+        setForm(["lock_serial_no": serial, "enabled": enabled ? "true" : "false"], on: &req)
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
     /// SIM / data-plan status. This is the same call the official app makes
     /// routinely on its main screen to read usage (it returns status; billing
     /// is a separate Stripe flow). Needs a location (phone or lock).
@@ -244,6 +268,22 @@ struct APIClient {
             throw APIError.server(status.message ?? "Verzoek mislukt.")
         }
         return status
+    }
+
+    private func decodeObject<T: Decodable>(_ req: URLRequest, as type: T.Type) async throws -> T {
+        let (data, http) = try await rawSend(req)
+        try throwIfHTTPError(http, data)
+        do {
+            let env = try JSONDecoder().decode(APIEnvelope<T>.self, from: data)
+            guard env.isSuccess, let payload = env.data else {
+                throw APIError.server(env.message ?? "Verzoek mislukt.")
+            }
+            return payload
+        } catch let e as APIError {
+            throw e
+        } catch {
+            throw APIError.decoding("\(error)")
+        }
     }
 
     private func decodeArray<T: Decodable>(_ req: URLRequest, as type: T.Type) async throws -> [T] {

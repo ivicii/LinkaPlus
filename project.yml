@@ -11,12 +11,21 @@ settings:
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
+packages:
+  Stripe:
+    url: https://github.com/stripe/stripe-ios
+    from: "23.0.0"
 targets:
   LinkaPlus:
     type: application
     platform: iOS
     sources:
       - Sources
+    dependencies:
+      - package: Stripe
+        product: StripePaymentSheet
+      - package: Stripe
+        product: StripePayments
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ivoroo.linkaplus
