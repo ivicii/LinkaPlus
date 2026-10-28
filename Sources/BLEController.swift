@@ -12,13 +12,23 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var ctxEncVer: Int?
     @Published private(set) var ctxCounter: UInt32?
     @Published private(set) var lockStateRaw: Int?
+    @Published private(set) var rssi: Int?
     @Published private(set) var lastEvent: String = "–"
+    @Published private(set) var commandResult: CommandResult?
     @Published private(set) var winner: String?
     @Published private(set) var testing = false
     @Published private(set) var log: [String] = []
 
-    /// Set by the firmware ASCII log after a command: true = accepted, false = rejected.
+    enum CommandResult: Equatable {
+        case success(String)   // actuated
+        case rejected          // wrong key/counter
+        case blocked(String)   // accepted but no actuation → motion/stall
+        case timeout
+    }
+
+    /// Set by the firmware ASCII log after a command.
     private var encAccepted: Bool?
+    private var vstateChanged = false
 
     static func stateText(_ v: Int?) -> String {
         switch v {
@@ -133,10 +143,14 @@ final class BLEController: NSObject, ObservableObject {
     /// Interpret the firmware ASCII debug log.
     private func handleEvent(_ s: String) {
         if s.contains("EncAdmin") || s.contains("EncUser") {
-            encAccepted = true; lastEvent = "✓ geaccepteerd (\(s))"
+            encAccepted = true; lastEvent = "commando geaccepteerd"
         } else if s.localizedCaseInsensitiveContains("Bad enc") {
-            encAccepted = false; lastEvent = "✗ geweigerd (verkeerde sleutel/teller)"
-        } else if s.contains("Motor Open") || s.contains("Motor Close") || s.contains("VState Change") {
+            encAccepted = false; lastEvent = "geweigerd (sleutel/teller)"
+        } else if s.contains("VState Change") {
+            vstateChanged = true; lastEvent = "slotstand gewijzigd"
+        } else if s.localizedCaseInsensitiveContains("stall") {
+            lastEvent = "geblokkeerd / beweging (stall)"
+        } else if s.contains("Motor Open") || s.contains("Motor Close") {
             lastEvent = s
         }
     }
@@ -159,7 +173,24 @@ final class BLEController: NSObject, ObservableObject {
     func stop() {
         central.stopScan()
         if let p = peripheral { central.cancelPeripheralConnection(p) }
-        state = "gestopt"; ready = false
+        state = "gestopt"; ready = false; rssi = nil
+    }
+
+    private func startRSSIPolling() {
+        Task {
+            while ready, let p = peripheral {
+                p.readRSSI()
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
+        }
+    }
+
+    /// Rough distance estimate from RSSI (no UWB, so approximate).
+    var estimatedMeters: Double? {
+        guard let r = rssi else { return nil }
+        let txPower = -59.0   // typical RSSI at 1 m
+        let n = 2.5           // path-loss exponent
+        return pow(10.0, (txPower - Double(r)) / (10.0 * n))
     }
 
     func unlock() { send(cmd: 0, name: "UNLOCK") }
@@ -172,9 +203,19 @@ final class BLEController: NSObject, ObservableObject {
         let useCounter = UInt32(truncatingIfNeeded: Int(c) + counterOffset)
         let frame = LinkaCrypto.commandFrame(mac: mac, payload: [cmd, 0], subkey: subkey, priv: priv, counter: useCounter)
         let type: CBCharacteristicWriteType = ch.properties.contains(.write) ? .withResponse : .withoutResponse
-        encAccepted = nil
+        encAccepted = nil; vstateChanged = false; commandResult = nil
         add("→ \(name) via \(channel == 1 ? "0016" : "0002") (ctr \(useCounter)): \(LinkaCrypto.toHex(frame))")
         peripheral?.writeValue(Data(frame), for: ch, type: type)
+        // Evaluate the outcome from the firmware feedback.
+        Task {
+            for _ in 0..<16 {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                if vstateChanged { commandResult = .success(name); return }
+                if encAccepted == false { commandResult = .rejected; return }
+            }
+            if encAccepted == true { commandResult = .blocked(name) }
+            else { commandResult = .timeout }
+        }
     }
 }
 
@@ -228,6 +269,7 @@ extension BLEController: CBPeripheralDelegate {
             ready = (write0002 != nil || write0016 != nil)
             state = ready ? "klaar" : "verbonden (geen write-char)"
             add(ready ? "Klaar. Wacht op context-frame (0x12)…" : "Geen write-characteristic.")
+            if ready { startRSSIPolling() }
         }
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
@@ -251,5 +293,8 @@ extension BLEController: CBPeripheralDelegate {
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         Task { @MainActor in add(error == nil ? "✓ commando geschreven" : "✗ schrijven mislukt: \(error!.localizedDescription)") }
+    }
+    nonisolated func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        Task { @MainActor in if error == nil { rssi = RSSI.intValue } }
     }
 }

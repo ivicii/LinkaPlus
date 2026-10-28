@@ -25,6 +25,7 @@ struct LockDetailView: View {
     @StateObject private var ble = BLEController()
     @State private var bleStarted = false
     @State private var bleKeyError: String?
+    @State private var showFinder = false
 
     @State private var sim: SimStatus?
     @State private var simLoading = false
@@ -283,6 +284,9 @@ struct LockDetailView: View {
                     .environmentObject(session)
             }
         }
+        .sheet(isPresented: $showFinder) {
+            FindLockView(ble: ble, onSiren: { playSiren() })
+        }
     }
 
     // MARK: Bluetooth control card
@@ -325,8 +329,12 @@ struct LockDetailView: View {
             .disabled(!ble.ready)
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
 
-            if ble.lastEvent != "–" {
-                Text(ble.lastEvent).font(.caption).foregroundStyle(.secondary)
+            commandResultRow
+
+            if ble.ready {
+                Button { showFinder = true } label: {
+                    Label("Zoek je slot (signaalsterkte)", systemImage: "dot.radiowaves.left.and.right")
+                }
             }
             if let e = bleKeyError {
                 Text(e).font(.caption).foregroundStyle(.red)
@@ -335,6 +343,26 @@ struct LockDetailView: View {
             Text("Slot bedienen (Bluetooth)")
         } footer: {
             Text("Verbindt automatisch als je dichtbij bent. Houd het slot stil bij het sluiten.")
+        }
+    }
+
+    @ViewBuilder
+    private var commandResultRow: some View {
+        switch ble.commandResult {
+        case .success(let n):
+            Label("\(n) gelukt", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.callout)
+        case .rejected:
+            Label("Geweigerd — probeer opnieuw", systemImage: "xmark.circle.fill").foregroundStyle(.red).font(.callout)
+        case .blocked:
+            Label("⚠︎ Niet gelukt — beweging of blokkade gedetecteerd. Houd het slot stil en probeer opnieuw.",
+                  systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.callout)
+        case .timeout:
+            Label("Geen reactie van het slot — opnieuw proberen.", systemImage: "clock.badge.exclamationmark")
+                .foregroundStyle(.secondary).font(.callout)
+        case .none:
+            if ble.lastEvent != "–" {
+                Text(ble.lastEvent).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
