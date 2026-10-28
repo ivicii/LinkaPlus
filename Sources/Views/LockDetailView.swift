@@ -21,6 +21,10 @@ struct LockDetailView: View {
 
     @State private var showBLE = false
 
+    @State private var sim: SimStatus?
+    @State private var simLoading = false
+    @State private var simError: String?
+
     @StateObject private var loc = LocationProvider()
 
     private var distanceText: String? {
@@ -97,6 +101,50 @@ struct LockDetailView: View {
                         Label("Open in Kaarten / routebeschrijving", systemImage: "car.fill")
                     }
                 }
+            }
+
+            Section {
+                if let sim {
+                    statusRow("Verbonden", value: boolText(sim.connected),
+                              systemImage: sim.connected == true ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
+                    statusRow("Dataplan actief", value: boolText(sim.data_plan_enabled), systemImage: "simcard")
+                    if let exp = DateUtils.parseAny(sim.activation_expiry) {
+                        statusRow(sim.data_plan_enabled == true ? "Verlengt op" : "Verloopt op",
+                                  value: DateUtils.absolute(exp), systemImage: "calendar")
+                    }
+                    if let used = sim.usage?.bytes {
+                        statusRow("Verbruikt", value: mb(used), systemImage: "arrow.up.arrow.down")
+                    }
+                    if let incl = sim.initial_data {
+                        statusRow("Inbegrepen", value: mb(incl), systemImage: "externaldrive")
+                        statusRow("Resterend", value: mb(max(0, incl - (sim.usage?.bytes ?? 0))), systemImage: "gauge.medium")
+                    }
+                    if let c = sim.country, !c.isEmpty {
+                        statusRow("Land", value: c, systemImage: "globe.europe.africa")
+                    }
+                    if sim.payment_requires_attention == true {
+                        Label("Betaling vereist", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                    }
+                    Button { loadSim() } label: {
+                        Label("Vernieuwen", systemImage: "arrow.clockwise")
+                    }
+                } else {
+                    Button(action: loadSim) {
+                        HStack {
+                            if simLoading { ProgressView() }
+                            Label("Dataplan-status ophalen", systemImage: "simcard")
+                        }
+                    }
+                    .disabled(simLoading || lock.serial_no == nil)
+                }
+                if let simError {
+                    Text(simError).font(.caption).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Dataplan & verbruik")
+            } footer: {
+                Text("Haalt de cellulaire status op (zelfde call als de officiële app gebruikt). Betalen gebeurt apart; dit vraagt alleen de status op.")
             }
 
             Section("Vinden") {
@@ -225,6 +273,31 @@ struct LockDetailView: View {
         let item = MKMapItem(placemark: place)
         item.name = lock.displayName
         item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+    }
+
+    private func boolText(_ b: Bool?) -> String { b == true ? "Ja" : (b == false ? "Nee" : "–") }
+
+    private func mb(_ bytes: Int) -> String {
+        let m = Double(bytes) / 1_000_000
+        if m >= 1 { return String(format: "%.1f MB", m) }
+        return String(format: "%.0f KB", Double(bytes) / 1000)
+    }
+
+    private func loadSim() {
+        guard let serial = lock.serial_no else { return }
+        simLoading = true; simError = nil
+        Task {
+            // Prefer the phone's location; fall back to the lock's own.
+            let c = loc.coordinate ?? coordinate
+            let lat = c?.latitude ?? 0
+            let lng = c?.longitude ?? 0
+            do {
+                sim = try await api.simStatus(serial: serial, lat: lat, lng: lng, auth: session.identity())
+            } catch {
+                simError = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error)"
+            }
+            simLoading = false
+        }
     }
 
     private func playSiren() {

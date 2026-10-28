@@ -141,6 +141,21 @@ struct APIClient {
         return env.data?.activities ?? []
     }
 
+    /// SIM / data-plan status. This is the same call the official app makes
+    /// routinely on its main screen to read usage (it returns status; billing
+    /// is a separate Stripe flow). Needs a location (phone or lock).
+    func simStatus(serial: String, lat: Double, lng: Double, auth: Identity) async throws -> SimStatus {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/leo/activate_sim_consumer"))
+        req.httpMethod = "POST"
+        setForm(["lock_serial_no": serial, "latitude": String(lat), "longitude": String(lng)], on: &req)
+        authorize(&req, auth: auth)
+        let (data, http) = try await rawSend(req)
+        try throwIfHTTPError(http, data)
+        let env = try JSONDecoder().decode(APIEnvelope<SimStatus>.self, from: data)
+        guard env.isSuccess, let d = env.data else { throw APIError.server(env.message ?? "Geen SIM-status.") }
+        return d
+    }
+
     /// Play the lock's siren so you can locate it (LEO cellular feature).
     func activateSiren(serial: String, auth: Identity) async throws {
         var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/leo/activate_siren"))

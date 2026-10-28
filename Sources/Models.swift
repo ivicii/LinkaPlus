@@ -105,6 +105,26 @@ extension Lock {
     }
 }
 
+// MARK: - SIM / data-plan status (from activate_sim_consumer)
+
+struct DataUsage: Decodable {
+    let bytes: Int?
+    let date: String?
+}
+
+struct SimStatus: Decodable {
+    let connected: Bool?
+    let data_plan_enabled: Bool?
+    let activation_expiry: String?
+    let initial_data: Int?
+    let usage: DataUsage?
+    let country: String?
+    let theft_status: Int?
+    let payment_requires_attention: Bool?
+    let recovery_mode: Bool?
+    let is_non_cellular: Bool?
+}
+
 // MARK: - Live tracking (recovery mode)
 
 struct CurrentTracking: Decodable {
