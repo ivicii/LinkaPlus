@@ -320,7 +320,7 @@ struct LockDetailView: View {
         } header: {
             Text("Live tracking")
         } footer: {
-            Text("Recovery-modus is de anti-diefstalstand: het slot stuurt dan continu zijn GPS-positie door (verbruikt meer batterij en dataplan). De afgelegde route verschijnt op de kaart.")
+            Text("Op de LEO armt de anti-diefstal/tracking meestal vanzelf: sluit het slot, dan houdt het bij beweging zelf de GPS bij en mailt je. Handmatig starten kan \"not currently active\" geven als er geen actieve trackingsessie is. Vereist resterende data in je dataplan.")
         }
     }
 
@@ -806,7 +806,13 @@ struct LockDetailView: View {
                     routePoints = []
                 }
             } catch {
-                recoveryMessage = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error)"
+                let raw = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                if raw.localizedCaseInsensitiveContains("not currently")
+                    || raw.localizedCaseInsensitiveContains("not active") {
+                    recoveryMessage = "De server kan tracking nu niet handmatig starten (\"\(raw)\"). Op de LEO armt tracking vanzelf: sluit het slot, dan houdt het bij beweging zelf de GPS bij en mailt je. Zorg dat er nog data over is in je dataplan."
+                } else {
+                    recoveryMessage = "Mislukt: \(raw)"
+                }
             }
             recoveryBusy = false
         }
