@@ -11,8 +11,19 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var ready = false
     @Published private(set) var ctxEncVer: Int?
     @Published private(set) var ctxCounter: UInt32?
+    @Published private(set) var lockStateRaw: Int?
+    @Published private(set) var winner: String?
     @Published private(set) var testing = false
     @Published private(set) var log: [String] = []
+
+    static func stateText(_ v: Int?) -> String {
+        switch v {
+        case 0: return "Startup"; case 1: return "Sluiten…"; case 2: return "Openen…"
+        case 3: return "Dicht"; case 4: return "Open"; case 5: return "Fout"
+        case 6: return "Geblokkeerd"; case 7: return "Dicht (PAC)"; case 8: return "Open (PAC)"
+        default: return v.map { "onbekend (\($0))" } ?? "–"
+        }
+    }
 
     private var subkey: [UInt8] = []
     private var mac: [UInt8] = []
@@ -56,17 +67,24 @@ final class BLEController: NSObject, ObservableObject {
         return out
     }
 
-    /// Sweeps key variants × channels × counter offsets, sending an UNLOCK for
-    /// each so we can see which combination the lock reacts to.
+    /// Sweeps key variants × channels × counter offsets. Sends the command that
+    /// would CHANGE the current lock state and auto-detects when the lock flips —
+    /// then records the winning combination and locks the Open/Sluit buttons to it.
     func autoTest() {
         guard !testing else { return }
         let variants = keyVariants()
         guard !variants.isEmpty, mac.count == 6 else { add("Auto-test: geen sleutels/mac."); return }
         testing = true
-        add("== Auto-test gestart ==")
+        winner = nil
         Task {
+            let start = lockStateRaw
+            let sendLock = (start == 4 || start == 8 || start == nil && false) // open → lock
+            // If unknown, default to trying UNLOCK (target open).
+            let cmd: UInt8 = (start == 4 || start == 8) ? 1 : 0
+            let target = (cmd == 1) ? 3 : 4
+            add("== Auto-test == begintoestand: \(BLEController.stateText(start)); stuurt \(cmd == 1 ? "LOCK" : "UNLOCK"), zoekt flip naar \(BLEController.stateText(target)). Houd je slot stil.")
             let channels = [0, 1]
-            let offsets = [0, 1]
+            let offsets = [0, 1, -1]
             let total = variants.count * channels.count * offsets.count
             var idx = 0
             outer: for v in variants {
@@ -75,24 +93,31 @@ final class BLEController: NSObject, ObservableObject {
                         if !testing { break outer }
                         idx += 1
                         guard let c = ctxCounter else {
-                            add("[\(idx)/\(total)] geen teller — wacht op context…")
-                            try? await Task.sleep(nanoseconds: 1_500_000_000); continue
+                            add("[\(idx)/\(total)] wacht op teller…"); try? await Task.sleep(nanoseconds: 1_200_000_000); continue
                         }
                         let chr = (ch == 1) ? write0016 : write0002
-                        guard let chr = chr else {
-                            add("[\(idx)/\(total)] kanaal \(ch == 1 ? "0016" : "0002") niet beschikbaar"); continue
-                        }
+                        guard let chr = chr else { continue }
                         let useCounter = UInt32(truncatingIfNeeded: Int(c) + off)
-                        let frame = LinkaCrypto.commandFrame(mac: mac, payload: [0, 0],
+                        let frame = LinkaCrypto.commandFrame(mac: mac, payload: [cmd, 0],
                                                              subkey: LinkaCrypto.hex(v.hex), priv: v.priv, counter: useCounter)
-                        add("[TEST \(idx)/\(total)] UNLOCK key=\(v.name) ch=\(ch == 1 ? "0016" : "0002") off=\(off) ctr=\(useCounter)")
+                        add("[TEST \(idx)/\(total)] key=\(v.name) ch=\(ch == 1 ? "0016" : "0002") off=\(off) ctr=\(useCounter)")
                         let type: CBCharacteristicWriteType = chr.properties.contains(.write) ? .withResponse : .withoutResponse
                         peripheral?.writeValue(Data(frame), for: chr, type: type)
-                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        // Watch for the state flip for ~2.4s.
+                        for _ in 0..<8 {
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            if lockStateRaw == target || lockStateRaw == target + 4 {
+                                winner = "key=\(v.name) ch=\(ch == 1 ? "0016" : "0002") off=\(off)"
+                                subkey = LinkaCrypto.hex(v.hex); priv = v.priv; channel = ch; counterOffset = off
+                                add("✓✓ GELUKT! \(winner!) → slot nu \(BLEController.stateText(lockStateRaw)). Open/Sluit staan nu vast op deze combinatie.")
+                                testing = false
+                                break outer
+                            }
+                        }
                     }
                 }
             }
-            add("== Auto-test klaar (\(idx) pogingen) ==")
+            if winner == nil { add("== Auto-test klaar (\(idx) pogingen), geen flip gedetecteerd ==") }
             testing = false
         }
     }
@@ -203,6 +228,11 @@ extension BLEController: CBPeripheralDelegate {
                 ctxEncVer = Int(data[2])
                 ctxCounter = UInt32(data[3]) | (UInt32(data[4]) << 8) | (UInt32(data[5]) << 16) | (UInt32(data[6]) << 24)
                 add("CONTEXT: encVer \(ctxEncVer!), teller \(ctxCounter!)  [\(LinkaCrypto.toHex(data))]")
+            } else if data.count >= 10, data[0] == 0x14 {
+                // Lock state byte (plaintext): subtype 0x0a → [9], subtype 0x02 → [7].
+                let st: Int? = (data[1] == 0x0a) ? Int(data[9]) : (data[1] == 0x02 && data.count >= 8 ? Int(data[7]) : nil)
+                if let st = st { lockStateRaw = st }
+                add("status \(uuid.prefix(8)) slot=\(BLEController.stateText(st)): \(LinkaCrypto.toHex(data))")
             } else {
                 add("← \(uuid.prefix(8)): \(LinkaCrypto.toHex(data))")
             }

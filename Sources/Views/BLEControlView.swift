@@ -20,7 +20,14 @@ struct BLEControlView: View {
             List {
                 Section {
                     HStack { Text("Status").bold(); Spacer(); Text(ble.state).foregroundStyle(.secondary) }
-                    HStack { Text("Context encVer"); Spacer(); Text(ble.ctxEncVer.map(String.init) ?? "–").foregroundStyle(.secondary) }
+                    HStack {
+                        Text("Slot").bold(); Spacer()
+                        Text(BLEController.stateText(ble.lockStateRaw))
+                            .foregroundStyle(ble.lockStateRaw == 4 ? .orange : (ble.lockStateRaw == 3 ? .green : .secondary))
+                    }
+                    if let w = ble.winner {
+                        Label("Werkt: \(w)", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                    }
                     HStack { Text("Context teller"); Spacer(); Text(ble.ctxCounter.map(String.init) ?? "–").foregroundStyle(.secondary) }
                     if !keyLoaded {
                         Button { Task { await loadKeyAndStart() } } label: {
