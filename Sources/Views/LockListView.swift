@@ -7,6 +7,7 @@ struct LockListView: View {
     @State private var locks: [Lock] = []
     @State private var busy = false
     @State private var error: String?
+    @State private var showDiagnostics = false
 
     var body: some View {
         NavigationStack {
@@ -40,6 +41,7 @@ struct LockListView: View {
                         if let name = session.displayName { Text(name) }
                         if let email = session.email { Text(email) }
                         Divider()
+                        Button("Diagnose (API)") { showDiagnostics = true }
                         Button("Uitloggen", role: .destructive) { session.signOut() }
                     } label: {
                         Image(systemName: "person.circle")
@@ -47,6 +49,9 @@ struct LockListView: View {
                 }
             }
             .task { await load() }
+            .sheet(isPresented: $showDiagnostics) {
+                DiagnosticsView().environmentObject(session)
+            }
         }
     }
 

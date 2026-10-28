@@ -125,6 +125,40 @@ struct APIClient {
         return try await decodeArray(req, as: LockActivity.self)
     }
 
+    // MARK: - Diagnostics
+
+    struct ProbeResult: Identifiable {
+        let id = UUID()
+        let label: String
+        let line: String
+    }
+
+    /// Fire a raw request and return a compact status + body preview, never throwing.
+    func probe(label: String, method: String, path: String,
+               query: [String: String] = [:], form: [String: String]? = nil,
+               auth: Identity) async -> ProbeResult {
+        var comps = URLComponents(string: Self.baseURL.absoluteString + path)!
+        if !query.isEmpty {
+            comps.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
+        }
+        guard let url = comps.url else {
+            return ProbeResult(label: label, line: "bad url")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        if let form = form { setForm(form, on: &req) }
+        authorize(&req, auth: auth)
+        do {
+            let (data, http) = try await rawSend(req)
+            var body = String(data: data, encoding: .utf8) ?? "<binary>"
+            body = body.replacingOccurrences(of: "\n", with: " ")
+            if body.count > 400 { body = String(body.prefix(400)) + "…" }
+            return ProbeResult(label: label, line: "HTTP \(http.statusCode) — \(body)")
+        } catch {
+            return ProbeResult(label: label, line: "ERR \(error)")
+        }
+    }
+
     // MARK: - Helpers
 
     private func authorize(_ req: inout URLRequest, auth: Identity) {
