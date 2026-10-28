@@ -31,7 +31,7 @@ struct LoginData: Decodable {
 
 // MARK: - Locks
 
-struct Lock: Decodable, Identifiable, Hashable {
+struct Lock: Codable, Identifiable, Hashable {
     let _id: String
     let name: String?
     let serial_no: String?
@@ -114,7 +114,7 @@ struct KeyStatus: Decodable {
     let key: AccessKeys?
 }
 
-struct AccessKeys: Decodable {
+struct AccessKeys: Codable {
     let access_key_master: String?
     let access_key_master_2: String?
     let access_key_admin: String?

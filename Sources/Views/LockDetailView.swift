@@ -432,17 +432,22 @@ struct LockDetailView: View {
         guard !bleStarted, let serial = lock.serial_no else { return }
         bleStarted = true
         bleKeyError = nil
+        var keys: AccessKeys?
         do {
+            // Fresh from the cloud, and cache it for offline use.
             let status = try await api.checkKeyStatus(serial: serial, auth: session.identity())
-            guard let keys = status.key, keys.commandKey != nil else {
-                bleKeyError = "Geen bruikbare sleutel gevonden voor dit slot."
-                return
-            }
-            ble.configure(keys: keys, serial: serial, nameHint: lock.displayName)
-            ble.start()
+            keys = status.key
+            if let k = keys, k.commandKey != nil { LockCache.saveKeys(k, serial: serial) }
         } catch {
-            bleKeyError = (error as? LocalizedError)?.errorDescription ?? "Sleutel laden mislukt."
+            // Cloud unavailable → use the cached key so Bluetooth still works.
+            keys = LockCache.loadKeys(serial: serial)
         }
+        guard let k = keys, k.commandKey != nil else {
+            bleKeyError = "Geen sleutel gevonden (cloud onbereikbaar en geen offline cache)."
+            return
+        }
+        ble.configure(keys: k, serial: serial, nameHint: lock.displayName)
+        ble.start()
     }
 
     @ViewBuilder

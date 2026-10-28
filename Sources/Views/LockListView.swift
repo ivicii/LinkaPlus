@@ -8,6 +8,7 @@ struct LockListView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var showDiagnostics = false
+    @State private var offline = false
 
     var body: some View {
         NavigationStack {
@@ -23,9 +24,19 @@ struct LockListView: View {
                         description: "Er zijn geen sloten gekoppeld aan dit account."
                     )
                 } else {
-                    List(locks) { lock in
-                        NavigationLink(value: lock) {
-                            LockRow(lock: lock)
+                    List {
+                        if offline {
+                            Section {
+                                Label("Offline — opgeslagen gegevens. Bluetooth-bediening werkt.",
+                                      systemImage: "wifi.slash")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                        ForEach(locks) { lock in
+                            NavigationLink(value: lock) {
+                                LockRow(lock: lock)
+                            }
                         }
                     }
                     .refreshable { await load() }
@@ -69,8 +80,16 @@ struct LockListView: View {
         busy = true; error = nil
         do {
             locks = try await api.getLocks(auth: session.identity())
+            LockCache.saveLocks(locks)
+            offline = false
         } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            let cached = LockCache.loadLocks()
+            if !cached.isEmpty {
+                locks = cached
+                offline = true
+            } else {
+                self.error = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            }
         }
         busy = false
     }
