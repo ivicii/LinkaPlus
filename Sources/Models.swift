@@ -197,6 +197,27 @@ struct CurrentTracking: Decodable {
     let theft_tracking_id: String?
 }
 
+// MARK: - Sharing / permissions
+
+struct LockPermission: Decodable, Identifiable {
+    let userId: String?
+    let email: String?
+    let first_name: String?
+    let last_name: String?
+    let name: String?
+    let owner: Bool?
+    let isPendingApproval: Bool?
+    let lastUsed: String?
+
+    var id: String { userId ?? email ?? UUID().uuidString }
+    var displayName: String {
+        if let n = name, !n.isEmpty { return n }
+        let full = [first_name, last_name].compactMap { $0 }.joined(separator: " ")
+        if !full.isEmpty { return full }
+        return email ?? "Gebruiker"
+    }
+}
+
 // MARK: - Activities
 
 struct LockActivity: Decodable, Identifiable {

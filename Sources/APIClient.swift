@@ -212,6 +212,40 @@ struct APIClient {
         _ = try await sendExpectingStatus(req)
     }
 
+    // MARK: Sharing & management
+
+    func lockPermissions(serial: String, auth: Identity) async throws -> [LockPermission] {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/lock_permissions"))
+        req.httpMethod = "PUT"
+        setForm(["lock_serial_no": serial], on: &req)
+        authorize(&req, auth: auth)
+        return try await decodeArray(req, as: LockPermission.self)
+    }
+
+    func sendInvite(email: String, serial: String, auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/send_invite"))
+        req.httpMethod = "PUT"
+        setForm(["email": email, "lock_serial_no": serial], on: &req)
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
+    func revokeAccess(userId: String, serial: String, auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/revoke_access"))
+        req.httpMethod = "PUT"
+        setForm(["userId": userId, "lock_serial_no": serial], on: &req)
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
+    func renameLock(name: String, serial: String, isLocked: Bool, lockType: String, auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/locks"))
+        req.httpMethod = "POST"
+        setForm(["name": name, "serial_no": serial, "is_locked": isLocked ? "true" : "false", "lock_type": lockType], on: &req)
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
     /// Fetch the user's access keys for this lock (for BLE command encryption).
     func checkKeyStatus(serial: String, auth: Identity) async throws -> KeyStatus {
         var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/check_key_status_for_user_v2"))

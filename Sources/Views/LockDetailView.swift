@@ -28,6 +28,10 @@ struct LockDetailView: View {
     @State private var showFinder = false
     @State private var movementAlarmOn = false
     @State private var pacCode = ""
+    @State private var showStats = false
+    @State private var showSharing = false
+    @State private var showRename = false
+    @State private var renameText = ""
 
     private var liveLocked: Bool { ble.liveLocked ?? lock.is_locked ?? true }
 
@@ -258,6 +262,12 @@ struct LockDetailView: View {
                 Text("Recovery-modus is de anti-diefstalstand: het slot stuurt dan continu zijn GPS-positie door (verbruikt meer batterij en dataplan). De afgelegde route verschijnt op de kaart.")
             }
 
+            Section("Beheer") {
+                Button { showStats = true } label: { Label("Statistieken", systemImage: "chart.bar.fill") }
+                Button { showSharing = true } label: { Label("Delen & toegang", systemImage: "person.2.fill") }
+                Button { renameText = lock.displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
+            }
+
             Section {
                 Button {
                     showBLEControl = true
@@ -323,6 +333,21 @@ struct LockDetailView: View {
         }
         .sheet(isPresented: $showFinder) {
             FindLockView(ble: ble, onSiren: { if ble.ready { ble.sirenOn() } else { playSiren() } })
+        }
+        .sheet(isPresented: $showStats) {
+            StatsView(activities: activities, lockName: lock.displayName)
+        }
+        .sheet(isPresented: $showSharing) {
+            if let serial = lock.serial_no {
+                SharingView(serial: serial).environmentObject(session)
+            }
+        }
+        .alert("Slot hernoemen", isPresented: $showRename) {
+            TextField("Naam", text: $renameText)
+            Button("Annuleer", role: .cancel) {}
+            Button("Opslaan") { renameLock() }
+        } message: {
+            Text("Nieuwe naam voor dit slot (in de cloud).")
         }
     }
 
@@ -509,6 +534,14 @@ struct LockDetailView: View {
             }
             cards = (try? await api.getCards(auth: session.identity())) ?? cards
             simLoading = false
+        }
+    }
+
+    private func renameLock() {
+        guard let serial = lock.serial_no, !renameText.isEmpty else { return }
+        Task {
+            try? await api.renameLock(name: renameText, serial: serial,
+                                      isLocked: liveLocked, lockType: "original", auth: session.identity())
         }
     }
 
