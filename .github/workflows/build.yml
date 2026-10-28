@@ -17,11 +17,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Diagnostics
+      - name: Select newest Xcode
         run: |
-          echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
+          echo "Installed Xcodes:"; ls -d /Applications/Xcode_*.app 2>/dev/null || true
+          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$LATEST" ]; then
+            echo "Selecting $LATEST"
+            sudo xcode-select -s "$LATEST/Contents/Developer"
+          fi
+          echo "Active Xcode: $(xcodebuild -version | tr '\n' ' ')"
           echo "SDKs:"; xcodebuild -showsdks | grep -i iphoneos || true
-          echo "Files in repo root:"; ls -la
 
       - name: Install XcodeGen
         run: |
@@ -39,7 +44,9 @@ jobs:
       - name: Generate Xcode project
         run: |
           set -eo pipefail
+          xcodegen --version || true
           xcodegen generate --spec project.yml
+          echo "objectVersion: $(grep -m1 objectVersion LinkaPlus.xcodeproj/project.pbxproj | tr -d ' ;')"
           echo "Schemes:"
           xcodebuild -list -project LinkaPlus.xcodeproj || true
 
