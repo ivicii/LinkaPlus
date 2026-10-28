@@ -52,4 +52,13 @@ enum DateUtils {
     static func absoluteWithRelative(_ d: Date) -> String {
         "\(absolute(d)) (\(relative(d)))"
     }
+
+    private static let hmFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    /// "22:35"
+    static func timeHM(_ d: Date) -> String { hmFmt.string(from: d) }
 }

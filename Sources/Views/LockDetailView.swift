@@ -54,6 +54,7 @@ struct LockDetailView: View {
     @State private var simError: String?
     @State private var showRenew = false
     @State private var cards: [SavedCard] = []
+    @State private var simFetchedAt: Date?
 
     @StateObject private var loc = LocationProvider()
 
@@ -258,7 +259,13 @@ struct LockDetailView: View {
             } header: {
                 Text("Dataplan & verbruik")
             } footer: {
-                Text("Haalt de cellulaire status op (zelfde call als de officiële app gebruikt). Betalen gebeurt apart; dit vraagt alleen de status op.")
+                VStack(alignment: .leading, spacing: 4) {
+                    if let t = simFetchedAt {
+                        Label("Status opgehaald om \(DateUtils.timeHM(t)) · tik Vernieuwen voor live",
+                              systemImage: "clock")
+                    }
+                    Text("Haalt de cellulaire status op (zelfde call als de officiële app gebruikt). De teller kan iets achterlopen op de provider. Betalen gebeurt apart; dit vraagt alleen de status op.")
+                }
             }
     }
 
@@ -760,6 +767,7 @@ struct LockDetailView: View {
             let lng = c?.longitude ?? 0
             do {
                 sim = try await api.simStatus(serial: serial, lat: lat, lng: lng, auth: session.identity())
+                simFetchedAt = Date()
             } catch {
                 simError = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error)"
             }
