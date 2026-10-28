@@ -85,7 +85,31 @@ struct APIClient {
     // MARK: Authenticated endpoints
 
     func getLocks(auth: Identity) async throws -> [Lock] {
-        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/locks"))
+        // The /api/locks collection requires a Mongo-style `query` param
+        // (same pattern the app uses for a single lock: {"serial_no": "..."}).
+        // Try a user-scoped filter first, then an empty filter as fallback.
+        let userId = auth.userId ?? ""
+        let queries = [
+            "{\"userProfile_id\":\"\(userId)\"}",
+            "{}",
+        ]
+        var lastError: Error?
+        for q in queries {
+            do {
+                let locks = try await locksQuery(q, auth: auth)
+                if !locks.isEmpty { return locks }
+            } catch {
+                lastError = error
+            }
+        }
+        if let lastError { throw lastError }
+        return []
+    }
+
+    private func locksQuery(_ json: String, auth: Identity) async throws -> [Lock] {
+        var comps = URLComponents(string: Self.baseURL.absoluteString + "/api/locks/")!
+        comps.queryItems = [URLQueryItem(name: "query", value: json)]
+        var req = URLRequest(url: comps.url!)
         req.httpMethod = "GET"
         authorize(&req, auth: auth)
         return try await decodeArray(req, as: Lock.self)
