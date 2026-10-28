@@ -224,10 +224,12 @@ struct LockDetailView: View {
             loc.start()
             await load()
             await syncRecoveryState()
+            loadSim()
         }
         .refreshable {
             await load()
             await syncRecoveryState()
+            loadSim()
         }
         .alert("Tracking-/recovery-modus aanzetten?", isPresented: $confirmEnable) {
             Button("Annuleer", role: .cancel) {}
