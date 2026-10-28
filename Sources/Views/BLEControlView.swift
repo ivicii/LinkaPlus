@@ -54,11 +54,13 @@ struct BLEControlView: View {
                         .disabled(!ble.ready)
                 }
 
-                Section("Iteratie-opties") {
+                Section {
                     Picker("Key slot", selection: $slot) {
                         Text("SLOT1").tag(0); Text("SLOT2").tag(1)
                     }
                     Stepper("Teller-offset: \(counterOffset)", value: $counterOffset, in: -1...2)
+                } header: {
+                    Text("Iteratie-opties")
                 } footer: {
                     Text("Als unlock niet werkt, probeer SLOT2 of teller-offset +1. De respons verschijnt in de log.")
                 }
