@@ -24,11 +24,8 @@ struct LockDetailView: View {
         return String(format: "%.1f km", meters / 1000)
     }
 
-    // iOS 16-compatible map region.
-    @State private var region = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 52.0, longitude: 5.0),
-        span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
-    )
+    /// When the lock's GPS location was last updated (location_update_time).
+    private var lastLocationDate: Date? { DateUtils.parseAny(lock.modifiedAt) }
 
     private var latestBattery: Int? {
         activities.compactMap { $0.batteryPercent }.first { $0 > 0 }
@@ -51,6 +48,13 @@ struct LockDetailView: View {
                 mapView
                     .frame(height: 220)
                     .listRowInsets(EdgeInsets())
+            } footer: {
+                if let d = lastLocationDate {
+                    Label("Locatie bijgewerkt: \(DateUtils.absoluteWithRelative(d))",
+                          systemImage: "clock.arrow.circlepath")
+                } else {
+                    Text("Tijd van laatste locatie onbekend.")
+                }
             }
 
             Section("Status") {
@@ -112,25 +116,17 @@ struct LockDetailView: View {
         }
         .navigationTitle(lock.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
+        .task {
+            loc.start()
+            await load()
+        }
         .refreshable { await load() }
     }
 
     @ViewBuilder
     private var mapView: some View {
         if let coordinate {
-            Map(coordinateRegion: $region,
-                showsUserLocation: true,
-                annotationItems: [MapPin(id: lock.serial_no ?? lock._id, coordinate: coordinate)]) { pin in
-                MapMarker(coordinate: pin.coordinate, tint: .red)
-            }
-            .onAppear {
-                loc.start()
-                region = MKCoordinateRegion(
-                    center: coordinate,
-                    span: MKCoordinateSpan(latitudeDelta: 0.008, longitudeDelta: 0.008)
-                )
-            }
+            LockMapView(coordinate: coordinate, title: lock.displayName)
         } else {
             ZStack {
                 Color(.secondarySystemBackground)
@@ -188,7 +184,11 @@ struct LockDetailView: View {
         busy = true; error = nil
         do {
             let result = try await api.fetchActivities(serial: serial, auth: session.identity())
-            activities = result.sorted { ($0.timestamp ?? $0.createdAt ?? "") > ($1.timestamp ?? $1.createdAt ?? "") }
+            activities = result.sorted {
+                let d0 = DateUtils.parseAny($0.timestamp) ?? DateUtils.parseISO($0.createdAt) ?? .distantPast
+                let d1 = DateUtils.parseAny($1.timestamp) ?? DateUtils.parseISO($1.createdAt) ?? .distantPast
+                return d0 > d1
+            }
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription ?? "\(error)"
         }
@@ -196,13 +196,16 @@ struct LockDetailView: View {
     }
 }
 
-struct MapPin: Identifiable {
-    let id: String
-    let coordinate: CLLocationCoordinate2D
-}
-
 struct ActivityRow: View {
     let activity: LockActivity
+
+    private var timeText: String? {
+        if let d = DateUtils.parseAny(activity.timestamp) ?? DateUtils.parseISO(activity.createdAt) {
+            return DateUtils.absolute(d)
+        }
+        return activity.timestamp ?? activity.createdAt
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
@@ -215,8 +218,8 @@ struct ActivityRow: View {
             if let desc = activity.msg_desc, !desc.isEmpty {
                 Text(desc).font(.caption).foregroundStyle(.secondary)
             }
-            if let ts = activity.timestamp ?? activity.createdAt {
-                Text(ts).font(.caption2).foregroundStyle(.tertiary)
+            if let timeText {
+                Text(timeText).font(.caption2).foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, 2)
