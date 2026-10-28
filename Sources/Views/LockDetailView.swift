@@ -20,6 +20,7 @@ struct LockDetailView: View {
     @State private var routePoints: [CLLocationCoordinate2D] = []
 
     @State private var showBLE = false
+    @State private var showBLEControl = false
 
     @State private var sim: SimStatus?
     @State private var simLoading = false
@@ -215,12 +216,19 @@ struct LockDetailView: View {
 
             Section {
                 Button {
+                    showBLEControl = true
+                } label: {
+                    Label("Open / Sluit via Bluetooth (Fase 2)", systemImage: "lock.open.rotation")
+                }
+                Button {
                     showBLE = true
                 } label: {
-                    Label("Bluetooth-diagnose (Fase 2)", systemImage: "dot.radiowaves.right")
+                    Label("Bluetooth-diagnose", systemImage: "dot.radiowaves.right")
                 }
+            } header: {
+                Text("Bluetooth")
             } footer: {
-                Text("Verbindt met je slot via Bluetooth en toont het GATT-profiel + statuspacket — voorbereiding voor openen/sluiten.")
+                Text("Open/Sluit stuurt een versleuteld commando naar je slot. De diagnose toont het GATT-profiel + statuspacket.")
             }
 
             Section("Activiteiten") {
@@ -254,6 +262,12 @@ struct LockDetailView: View {
         }
         .sheet(isPresented: $showBLE) {
             BLEDiagnosticsView(lockName: lock.displayName)
+        }
+        .sheet(isPresented: $showBLEControl) {
+            if let serial = lock.serial_no {
+                BLEControlView(serial: serial, lockName: lock.displayName)
+                    .environmentObject(session)
+            }
         }
         .sheet(isPresented: $showRenew) {
             if let serial = lock.serial_no {

@@ -105,6 +105,44 @@ extension Lock {
     }
 }
 
+// MARK: - Access keys (for BLE command encryption)
+
+struct KeyStatus: Decodable {
+    let ownsKey: Bool?
+    let isOwner: Bool?
+    let hasAdmin: Bool?
+    let key: AccessKeys?
+}
+
+struct AccessKeys: Decodable {
+    let access_key_master: String?
+    let access_key_master_2: String?
+    let access_key_admin: String?
+    let access_key_admin_2: String?
+    let access_key_user: String?
+    let access_key_user_2: String?
+    let v2_access_key_admin: String?
+    let v2_access_key_admin_2: String?
+    let v2_access_key_user: String?
+    let v2_access_key_user_2: String?
+
+    private func ne(_ s: String?) -> String? {
+        guard let s, !s.isEmpty else { return nil }
+        return s
+    }
+
+    /// Command key + privilege, mirroring the official app's selection order.
+    var commandKey: (hex: String, admin: Bool)? {
+        if let k = ne(v2_access_key_admin_2) { return (k, true) }
+        if let k = ne(v2_access_key_user_2)  { return (k, false) }
+        if let k = ne(access_key_admin_2)    { return (k, true) }
+        if let k = ne(access_key_user_2)     { return (k, false) }
+        if let k = ne(access_key_master_2)   { return (k, true) }
+        if let k = ne(access_key_master)     { return (k, true) }
+        return nil
+    }
+}
+
 // MARK: - Payments (Stripe) for data-plan renewal
 
 struct PaymentInfo: Decodable {

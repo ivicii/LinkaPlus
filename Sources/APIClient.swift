@@ -212,6 +212,15 @@ struct APIClient {
         _ = try await sendExpectingStatus(req)
     }
 
+    /// Fetch the user's access keys for this lock (for BLE command encryption).
+    func checkKeyStatus(serial: String, auth: Identity) async throws -> KeyStatus {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/check_key_status_for_user_v2"))
+        req.httpMethod = "PUT"
+        setForm(["lock_serial_no": serial, "device_token": auth.deviceToken], on: &req)
+        authorize(&req, auth: auth)
+        return try await decodeObject(req, as: KeyStatus.self)
+    }
+
     func fetchActivities(serial: String, auth: Identity) async throws -> [LockActivity] {
         var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/activitys/fetch"))
         req.httpMethod = "PUT"
