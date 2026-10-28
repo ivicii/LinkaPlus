@@ -22,6 +22,10 @@ struct LockDetailView: View {
     @State private var showBLE = false
     @State private var showBLEControl = false
 
+    @StateObject private var ble = BLEController()
+    @State private var bleStarted = false
+    @State private var bleKeyError: String?
+
     @State private var sim: SimStatus?
     @State private var simLoading = false
     @State private var simError: String?
@@ -71,6 +75,8 @@ struct LockDetailView: View {
                     Text("Tijd van laatste locatie onbekend.")
                 }
             }
+
+            bleControlSection
 
             Section("Status") {
                 statusRow(
@@ -218,7 +224,7 @@ struct LockDetailView: View {
                 Button {
                     showBLEControl = true
                 } label: {
-                    Label("Open / Sluit via Bluetooth (Fase 2)", systemImage: "lock.open.rotation")
+                    Label("Geavanceerde bediening & auto-test", systemImage: "slider.horizontal.3")
                 }
                 Button {
                     showBLE = true
@@ -226,9 +232,9 @@ struct LockDetailView: View {
                     Label("Bluetooth-diagnose", systemImage: "dot.radiowaves.right")
                 }
             } header: {
-                Text("Bluetooth")
+                Text("Geavanceerd")
             } footer: {
-                Text("Open/Sluit stuurt een versleuteld commando naar je slot. De diagnose toont het GATT-profiel + statuspacket.")
+                Text("Alleen nodig als de normale Open/Sluit niet werkt: handmatige sleutel/kanaal/teller en het GATT-profiel.")
             }
 
             Section("Activiteiten") {
@@ -245,10 +251,12 @@ struct LockDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             loc.start()
+            await startBLE()
             await load()
             await syncRecoveryState()
             loadSim()
         }
+        .onDisappear { ble.stop() }
         .refreshable {
             await load()
             await syncRecoveryState()
@@ -274,6 +282,76 @@ struct LockDetailView: View {
                 RenewDataPlanView(serial: serial, onActivated: { loadSim() })
                     .environmentObject(session)
             }
+        }
+    }
+
+    // MARK: Bluetooth control card
+
+    private var bleStatusText: String {
+        if bleKeyError != nil { return "Sleutel niet geladen" }
+        switch ble.state {
+        case "scannen": return "Zoeken naar slot…"
+        case "verbinden", "services": return "Verbinden…"
+        case "klaar": return ble.ready ? "Verbonden" : "Verbonden"
+        case "verbroken", "gestopt": return "Niet verbonden"
+        default: return ble.ready ? "Verbonden" : "Verbinden…"
+        }
+    }
+
+    @ViewBuilder
+    private var bleControlSection: some View {
+        Section {
+            HStack {
+                Image(systemName: ble.ready ? "dot.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
+                    .foregroundStyle(ble.ready ? .green : .secondary)
+                Text(bleStatusText).foregroundStyle(.secondary)
+                Spacer()
+                if !ble.ready && bleKeyError == nil { ProgressView() }
+                if ble.state == "verbroken" || ble.state == "gestopt" {
+                    Button("Opnieuw") { ble.start() }.font(.footnote)
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button { ble.channel = 0; ble.counterOffset = 0; ble.unlock() } label: {
+                    Label("Openen", systemImage: "lock.open.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(.green)
+                Button { ble.channel = 0; ble.counterOffset = 0; ble.lock() } label: {
+                    Label("Sluiten", systemImage: "lock.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(.blue)
+            }
+            .disabled(!ble.ready)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+
+            if ble.lastEvent != "–" {
+                Text(ble.lastEvent).font(.caption).foregroundStyle(.secondary)
+            }
+            if let e = bleKeyError {
+                Text(e).font(.caption).foregroundStyle(.red)
+            }
+        } header: {
+            Text("Slot bedienen (Bluetooth)")
+        } footer: {
+            Text("Verbindt automatisch als je dichtbij bent. Houd het slot stil bij het sluiten.")
+        }
+    }
+
+    private func startBLE() async {
+        guard !bleStarted, let serial = lock.serial_no else { return }
+        bleStarted = true
+        bleKeyError = nil
+        do {
+            let status = try await api.checkKeyStatus(serial: serial, auth: session.identity())
+            guard let keys = status.key, keys.commandKey != nil else {
+                bleKeyError = "Geen bruikbare sleutel gevonden voor dit slot."
+                return
+            }
+            ble.configure(keys: keys, serial: serial, nameHint: lock.displayName)
+            ble.start()
+        } catch {
+            bleKeyError = (error as? LocalizedError)?.errorDescription ?? "Sleutel laden mislukt."
         }
     }
 
