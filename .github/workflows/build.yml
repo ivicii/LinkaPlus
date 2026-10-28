@@ -8,15 +8,38 @@ on:
 jobs:
   build:
     runs-on: macos-14
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Diagnostics
+        run: |
+          echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
+          echo "SDKs:"; xcodebuild -showsdks | grep -i iphoneos || true
+          echo "Files in repo root:"; ls -la
+
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: |
+          set -eo pipefail
+          if brew install xcodegen; then
+            echo "xcodegen via brew"
+          else
+            echo "brew failed, downloading XcodeGen release binary"
+            curl -fsSL -o xcodegen.zip \
+              https://github.com/yonaskolb/XcodeGen/releases/download/2.42.0/xcodegen.zip
+            unzip -q xcodegen.zip -d "$HOME/xcodegen-dist"
+            echo "$HOME/xcodegen-dist/bin" >> "$GITHUB_PATH"
+          fi
 
       - name: Generate Xcode project
-        run: xcodegen generate
+        run: |
+          set -eo pipefail
+          xcodegen generate --spec project.yml
+          echo "Schemes:"
+          xcodebuild -list -project LinkaPlus.xcodeproj || true
 
       - name: Build (no code signing)
         run: |
