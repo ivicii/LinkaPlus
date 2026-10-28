@@ -60,6 +60,28 @@ struct DiagnosticsView: View {
             out.append(await api.probe(label: "PUT /api/keys/associated_locks",
                                        method: "PUT", path: "/api/keys/associated_locks",
                                        form: ["device_token": auth.deviceToken], auth: auth))
+
+            // Per-lock endpoints: resolve the first serial, then probe features.
+            let serial = (try? await api.getLocks(auth: auth))?.first?.serial_no ?? ""
+            out.append(APIClient.ProbeResult(label: "— serial in gebruik —", line: serial))
+
+            out.append(await api.probe(label: "POST /api/leo/current_active",
+                                       method: "POST", path: "/api/leo/current_active",
+                                       form: ["lock_serial_no": serial], auth: auth))
+            out.append(await api.probe(label: "POST /api/leo/tracking_history",
+                                       method: "POST", path: "/api/leo/tracking_history",
+                                       form: ["lock_serial_no": serial], auth: auth))
+            out.append(await api.probe(label: "POST /api/leo/current_tracking (epoch)",
+                                       method: "POST", path: "/api/leo/current_tracking",
+                                       form: ["lock_serial_no": serial,
+                                              "date": "1970-01-01T00:00:00.000+0000"], auth: auth))
+            out.append(await api.probe(label: "PUT /api/keys/lock_permissions",
+                                       method: "PUT", path: "/api/keys/lock_permissions",
+                                       form: ["lock_serial_no": serial], auth: auth))
+            out.append(await api.probe(label: "POST /api/payments_consumer/stripe/get_payment_info",
+                                       method: "POST", path: "/api/payments_consumer/stripe/get_payment_info",
+                                       auth: auth))
+
             await MainActor.run {
                 results = out
                 busy = false

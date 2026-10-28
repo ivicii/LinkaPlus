@@ -13,6 +13,17 @@ struct LockDetailView: View {
     @State private var sirenBusy = false
     @State private var sirenMessage: String?
 
+    @StateObject private var loc = LocationProvider()
+
+    private var distanceText: String? {
+        guard let c = coordinate, let me = loc.coordinate else { return nil }
+        let a = CLLocation(latitude: c.latitude, longitude: c.longitude)
+        let b = CLLocation(latitude: me.latitude, longitude: me.longitude)
+        let meters = a.distance(from: b)
+        if meters < 1000 { return String(format: "%.0f m", meters) }
+        return String(format: "%.1f km", meters / 1000)
+    }
+
     // iOS 16-compatible map region.
     @State private var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 52.0, longitude: 5.0),
@@ -49,7 +60,15 @@ struct LockDetailView: View {
                     systemImage: (lock.is_locked ?? true) ? "lock.fill" : "lock.open.fill"
                 )
                 if let battery = latestBattery {
-                    statusRow("Batterij", value: "\(battery)%", systemImage: batteryIcon(battery))
+                    HStack {
+                        Label("Batterij", systemImage: batteryIcon(battery))
+                        Spacer()
+                        Text("\(battery)%" + (battery < 20 ? "  ⚠︎ laag" : ""))
+                            .foregroundStyle(battery < 20 ? .red : .secondary)
+                    }
+                }
+                if let distanceText {
+                    statusRow("Afstand tot slot", value: distanceText, systemImage: "location.fill")
                 }
                 if let serial = lock.serial_no {
                     statusRow("Serienummer", value: serial, systemImage: "number")
@@ -101,10 +120,12 @@ struct LockDetailView: View {
     private var mapView: some View {
         if let coordinate {
             Map(coordinateRegion: $region,
+                showsUserLocation: true,
                 annotationItems: [MapPin(id: lock.serial_no ?? lock._id, coordinate: coordinate)]) { pin in
                 MapMarker(coordinate: pin.coordinate, tint: .red)
             }
             .onAppear {
+                loc.start()
                 region = MKCoordinateRegion(
                     center: coordinate,
                     span: MKCoordinateSpan(latitudeDelta: 0.008, longitudeDelta: 0.008)
