@@ -14,8 +14,26 @@ struct StatsView: View {
         DateUtils.parseAny(a.timestamp) ?? DateUtils.parseISO(a.createdAt)
     }
 
-    private var opens: Int { activities.filter { ($0.msg_title ?? "").localizedCaseInsensitiveContains("unlock") }.count }
-    private var closes: Int { activities.filter { ($0.msg_title ?? "").localizedCaseInsensitiveContains("lock") && !($0.msg_title ?? "").localizedCaseInsensitiveContains("unlock") }.count }
+    private enum Dir { case open, close, other }
+
+    /// Classify an activity as open/close, tolerant of language and schema.
+    private func classify(_ a: LockActivity) -> Dir {
+        let t = ((a.msg_title ?? "") + " " + (a.msg_desc ?? "")).lowercased()
+        // Open wins first so "unlocked"/"ontgrendeld" never counts as a close.
+        let openWords  = ["unlock", "opened", "geopend", "ontgrendeld", "open"]
+        let closeWords = ["locked", "closed", "gesloten", "vergrendeld", "dicht", "slot dicht"]
+        if openWords.contains(where: { t.contains($0) })  { return .open }
+        if closeWords.contains(where: { t.contains($0) }) { return .close }
+        // Fallback on the numeric direction field (0 = open, 1 = close).
+        if let d = a.direction {
+            if d == 0 { return .open }
+            if d == 1 { return .close }
+        }
+        return .other
+    }
+
+    private var opens: Int  { activities.filter { classify($0) == .open }.count }
+    private var closes: Int { activities.filter { classify($0) == .close }.count }
 
     private var lastUsed: Date? { activities.compactMap(date).max() }
     private var currentBattery: Int? { activities.compactMap { $0.batteryPercent }.first { $0 > 0 } }
