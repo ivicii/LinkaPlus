@@ -109,3 +109,17 @@ jobs:
           path: LinkaPlus.ipa
           if-no-files-found: error
           retention-days: 30
+
+      - name: Commit IPA into dist/
+        run: |
+          set -eo pipefail
+          mkdir -p dist
+          cp LinkaPlus.ipa dist/LinkaPlus.ipa
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f dist/LinkaPlus.ipa
+          if git diff --cached --quiet; then
+            echo "No IPA change"; exit 0
+          fi
+          git commit -m "Build: update dist/LinkaPlus.ipa [skip ci]"
+          git push origin HEAD:main
