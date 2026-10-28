@@ -12,9 +12,13 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var ctxEncVer: Int?
     @Published private(set) var ctxCounter: UInt32?
     @Published private(set) var lockStateRaw: Int?
+    @Published private(set) var lastEvent: String = "–"
     @Published private(set) var winner: String?
     @Published private(set) var testing = false
     @Published private(set) var log: [String] = []
+
+    /// Set by the firmware ASCII log after a command: true = accepted, false = rejected.
+    private var encAccepted: Bool?
 
     static func stateText(_ v: Int?) -> String {
         switch v {
@@ -77,47 +81,42 @@ final class BLEController: NSObject, ObservableObject {
         testing = true
         winner = nil
         Task {
-            let start = lockStateRaw
-            let sendLock = (start == 4 || start == 8 || start == nil && false) // open → lock
-            // If unknown, default to trying UNLOCK (target open).
-            let cmd: UInt8 = (start == 4 || start == 8) ? 1 : 0
-            let target = (cmd == 1) ? 3 : 4
-            add("== Auto-test == begintoestand: \(BLEController.stateText(start)); stuurt \(cmd == 1 ? "LOCK" : "UNLOCK"), zoekt flip naar \(BLEController.stateText(target)). Houd je slot stil.")
+            // Detection is via the firmware log: "EncAdmin"/"EncUser" = accepted.
+            // Counter must be the live context value, so only off=0 is valid.
+            add("== Auto-test == stuurt een UNLOCK met elke sleutel × kanaal (live teller). Detecteert 'EncAdmin'.")
             let channels = [0, 1]
-            let offsets = [0, 1, -1]
-            let total = variants.count * channels.count * offsets.count
+            let total = variants.count * channels.count
             var idx = 0
             outer: for v in variants {
                 for ch in channels {
-                    for off in offsets {
-                        if !testing { break outer }
-                        idx += 1
-                        guard let c = ctxCounter else {
-                            add("[\(idx)/\(total)] wacht op teller…"); try? await Task.sleep(nanoseconds: 1_200_000_000); continue
+                    if !testing { break outer }
+                    idx += 1
+                    guard let c = ctxCounter else {
+                        add("[\(idx)/\(total)] wacht op teller…"); try? await Task.sleep(nanoseconds: 1_200_000_000); continue
+                    }
+                    let chr = (ch == 1) ? write0016 : write0002
+                    guard let chr = chr else { continue }
+                    encAccepted = nil
+                    let frame = LinkaCrypto.commandFrame(mac: mac, payload: [0, 0],
+                                                         subkey: LinkaCrypto.hex(v.hex), priv: v.priv, counter: c)
+                    add("[TEST \(idx)/\(total)] key=\(v.name) ch=\(ch == 1 ? "0016" : "0002") ctr=\(c)")
+                    let type: CBCharacteristicWriteType = chr.properties.contains(.write) ? .withResponse : .withoutResponse
+                    peripheral?.writeValue(Data(frame), for: chr, type: type)
+                    // Wait for the firmware verdict (~2s).
+                    for _ in 0..<8 {
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                        if encAccepted == true {
+                            winner = "key=\(v.name) ch=\(ch == 1 ? "0016" : "0002")"
+                            subkey = LinkaCrypto.hex(v.hex); priv = v.priv; channel = ch; counterOffset = 0
+                            add("✓✓ GELUKT! \(winner!) geaccepteerd. Open/Sluit staan nu vast op deze combinatie.")
+                            testing = false
+                            break outer
                         }
-                        let chr = (ch == 1) ? write0016 : write0002
-                        guard let chr = chr else { continue }
-                        let useCounter = UInt32(truncatingIfNeeded: Int(c) + off)
-                        let frame = LinkaCrypto.commandFrame(mac: mac, payload: [cmd, 0],
-                                                             subkey: LinkaCrypto.hex(v.hex), priv: v.priv, counter: useCounter)
-                        add("[TEST \(idx)/\(total)] key=\(v.name) ch=\(ch == 1 ? "0016" : "0002") off=\(off) ctr=\(useCounter)")
-                        let type: CBCharacteristicWriteType = chr.properties.contains(.write) ? .withResponse : .withoutResponse
-                        peripheral?.writeValue(Data(frame), for: chr, type: type)
-                        // Watch for the state flip for ~2.4s.
-                        for _ in 0..<8 {
-                            try? await Task.sleep(nanoseconds: 300_000_000)
-                            if lockStateRaw == target || lockStateRaw == target + 4 {
-                                winner = "key=\(v.name) ch=\(ch == 1 ? "0016" : "0002") off=\(off)"
-                                subkey = LinkaCrypto.hex(v.hex); priv = v.priv; channel = ch; counterOffset = off
-                                add("✓✓ GELUKT! \(winner!) → slot nu \(BLEController.stateText(lockStateRaw)). Open/Sluit staan nu vast op deze combinatie.")
-                                testing = false
-                                break outer
-                            }
-                        }
+                        if encAccepted == false { break }  // rejected, next combo
                     }
                 }
             }
-            if winner == nil { add("== Auto-test klaar (\(idx) pogingen), geen flip gedetecteerd ==") }
+            if winner == nil { add("== Auto-test klaar (\(idx) pogingen), geen acceptatie gedetecteerd ==") }
             testing = false
         }
     }
@@ -130,6 +129,17 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func fullLog() -> String { log.reversed().joined(separator: "\n") }
+
+    /// Interpret the firmware ASCII debug log.
+    private func handleEvent(_ s: String) {
+        if s.contains("EncAdmin") || s.contains("EncUser") {
+            encAccepted = true; lastEvent = "✓ geaccepteerd (\(s))"
+        } else if s.localizedCaseInsensitiveContains("Bad enc") {
+            encAccepted = false; lastEvent = "✗ geweigerd (verkeerde sleutel/teller)"
+        } else if s.contains("Motor Open") || s.contains("Motor Close") || s.contains("VState Change") {
+            lastEvent = s
+        }
+    }
 
     private func add(_ s: String) {
         log.insert(s, at: 0)
@@ -162,6 +172,7 @@ final class BLEController: NSObject, ObservableObject {
         let useCounter = UInt32(truncatingIfNeeded: Int(c) + counterOffset)
         let frame = LinkaCrypto.commandFrame(mac: mac, payload: [cmd, 0], subkey: subkey, priv: priv, counter: useCounter)
         let type: CBCharacteristicWriteType = ch.properties.contains(.write) ? .withResponse : .withoutResponse
+        encAccepted = nil
         add("→ \(name) via \(channel == 1 ? "0016" : "0002") (ctr \(useCounter)): \(LinkaCrypto.toHex(frame))")
         peripheral?.writeValue(Data(frame), for: ch, type: type)
     }
@@ -228,11 +239,11 @@ extension BLEController: CBPeripheralDelegate {
                 ctxEncVer = Int(data[2])
                 ctxCounter = UInt32(data[3]) | (UInt32(data[4]) << 8) | (UInt32(data[5]) << 16) | (UInt32(data[6]) << 24)
                 add("CONTEXT: encVer \(ctxEncVer!), teller \(ctxCounter!)  [\(LinkaCrypto.toHex(data))]")
-            } else if data.count >= 10, data[0] == 0x14 {
-                // Lock state byte (plaintext): subtype 0x0a → [9], subtype 0x02 → [7].
-                let st: Int? = (data[1] == 0x0a) ? Int(data[9]) : (data[1] == 0x02 && data.count >= 8 ? Int(data[7]) : nil)
-                if let st = st { lockStateRaw = st }
-                add("status \(uuid.prefix(8)) slot=\(BLEController.stateText(st)): \(LinkaCrypto.toHex(data))")
+            } else if characteristic.uuid == LinkaBLE.leoLog {
+                // D31E0014 firmware debug log (ASCII) — the reliable signal.
+                let s = String(bytes: data, encoding: .utf8) ?? LinkaCrypto.toHex(data)
+                handleEvent(s)
+                add("· \(s)")
             } else {
                 add("← \(uuid.prefix(8)): \(LinkaCrypto.toHex(data))")
             }

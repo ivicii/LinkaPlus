@@ -20,10 +20,9 @@ struct BLEControlView: View {
             List {
                 Section {
                     HStack { Text("Status").bold(); Spacer(); Text(ble.state).foregroundStyle(.secondary) }
-                    HStack {
-                        Text("Slot").bold(); Spacer()
-                        Text(BLEController.stateText(ble.lockStateRaw))
-                            .foregroundStyle(ble.lockStateRaw == 4 ? .orange : (ble.lockStateRaw == 3 ? .green : .secondary))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Laatste melding (firmware)").font(.caption).foregroundStyle(.secondary)
+                        Text(ble.lastEvent).font(.system(.caption, design: .monospaced))
                     }
                     if let w = ble.winner {
                         Label("Werkt: \(w)", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
