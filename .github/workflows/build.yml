@@ -1,0 +1,56 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build (no code signing)
+        run: |
+          set -eo pipefail
+          xcodebuild \
+            -project LinkaPlus.xcodeproj \
+            -scheme LinkaPlus \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            clean build
+
+      - name: Package into .ipa
+        run: |
+          set -eo pipefail
+          APP_PATH="build/Build/Products/Release-iphoneos/LinkaPlus.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Build output not found at $APP_PATH"; exit 1
+          fi
+          rm -rf Payload LinkaPlus.ipa
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry LinkaPlus.ipa Payload
+          echo "Created LinkaPlus.ipa"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinkaPlus-unsigned-ipa
+          path: LinkaPlus.ipa
+          if-no-files-found: error
+          retention-days: 30
