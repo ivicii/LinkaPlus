@@ -364,45 +364,119 @@ struct LockDetailView: View {
         }
     }
 
+    // MARK: Hero control
+
+    private var heroColor: Color { liveLocked ? Theme.locked : Theme.open }
+
+    private var heroSubtitle: String {
+        if !ble.ready { return bleStatusText }
+        return liveLocked ? "Tik om te openen" : "Tik om te sluiten"
+    }
+
+    private var heroControl: some View {
+        VStack(spacing: 18) {
+            // Connection pill
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(ble.ready ? Theme.locked : Color.orange)
+                    .frame(width: 9, height: 9)
+                Text(bleStatusText)
+                    .font(.subheadline.weight(.semibold))
+                if !ble.ready && bleKeyError == nil {
+                    ProgressView().scaleEffect(0.7)
+                }
+            }
+            .foregroundStyle(.secondary)
+
+            // Big tactile lock button
+            Button {
+                Haptic.tap()
+                ble.channel = 0; ble.counterOffset = 0
+                if liveLocked { ble.unlock() } else { ble.lock() }
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(Theme.grad(heroColor))
+                        .frame(width: 184, height: 184)
+                        .shadow(color: heroColor.opacity(0.45), radius: 22, y: 10)
+                    Circle()
+                        .stroke(Color.white.opacity(0.22), lineWidth: 2)
+                        .frame(width: 184, height: 184)
+                    VStack(spacing: 10) {
+                        Image(systemName: liveLocked ? "lock.fill" : "lock.open.fill")
+                            .font(.system(size: 58, weight: .bold))
+                        Text(heroSubtitle)
+                            .font(.footnote.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                    }
+                    .foregroundStyle(.white)
+                }
+            }
+            .buttonStyle(PressableStyle())
+            .disabled(!ble.ready)
+            .opacity(ble.ready ? 1 : 0.55)
+            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: liveLocked)
+
+            // Quick stats
+            HStack(spacing: 22) {
+                heroStat(liveLocked ? "Vergrendeld" : "Open",
+                         liveLocked ? "lock.fill" : "lock.open.fill", heroColor)
+                if let b = latestBattery {
+                    heroStat("\(b)%", batteryIcon(b), b < 20 ? Theme.danger : .secondary)
+                }
+                if let d = distanceText {
+                    heroStat(d, "location.fill", .secondary)
+                }
+            }
+            .font(.caption)
+
+            commandResultRow
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+    }
+
+    private func heroStat(_ text: String, _ icon: String, _ color: Color) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: icon).font(.title3).foregroundStyle(color)
+            Text(text).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(minWidth: 56)
+    }
+
     @ViewBuilder
     private var bleControlSection: some View {
         Section {
-            HStack {
-                Image(systemName: ble.ready ? "dot.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
-                    .foregroundStyle(ble.ready ? .green : .secondary)
-                Text(bleStatusText).foregroundStyle(.secondary)
-                Spacer()
-                if !ble.ready && bleKeyError == nil { ProgressView() }
-                if ble.state == "verbroken" || ble.state == "gestopt" {
-                    Button("Opnieuw") { ble.start() }.font(.footnote)
-                }
-            }
+            heroControl
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
 
             HStack(spacing: 12) {
-                Button { ble.channel = 0; ble.counterOffset = 0; ble.unlock() } label: {
+                Button { Haptic.tap(.light); ble.channel = 0; ble.counterOffset = 0; ble.unlock() } label: {
                     Label("Openen", systemImage: "lock.open.fill").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent).tint(.green)
-                Button { ble.channel = 0; ble.counterOffset = 0; ble.lock() } label: {
+                .buttonStyle(.borderedProminent).tint(Theme.open)
+                Button { Haptic.tap(.light); ble.channel = 0; ble.counterOffset = 0; ble.lock() } label: {
                     Label("Sluiten", systemImage: "lock.fill").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent).tint(.blue)
+                .buttonStyle(.borderedProminent).tint(Theme.locked)
             }
+            .controlSize(.large)
             .disabled(!ble.ready)
-            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-
-            commandResultRow
 
             if ble.ready {
                 Button { showFinder = true } label: {
                     Label("Zoek je slot (signaalsterkte)", systemImage: "dot.radiowaves.left.and.right")
                 }
             }
+            if ble.state == "verbroken" || ble.state == "gestopt" {
+                Button { ble.start() } label: {
+                    Label("Opnieuw verbinden", systemImage: "arrow.clockwise")
+                }
+            }
             if let e = bleKeyError {
                 Text(e).font(.caption).foregroundStyle(.red)
             }
-        } header: {
-            Text("Slot bedienen (Bluetooth)")
         } footer: {
             Text("Verbindt automatisch als je dichtbij bent. Houd het slot stil bij het sluiten.")
         }

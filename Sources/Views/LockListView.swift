@@ -97,25 +97,33 @@ struct LockListView: View {
 
 struct LockRow: View {
     let lock: Lock
+    private var isLocked: Bool { lock.is_locked ?? true }
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: (lock.is_locked ?? true) ? "lock.fill" : "lock.open.fill")
-                .foregroundStyle((lock.is_locked ?? true) ? .green : .orange)
-                .font(.title2)
-                .frame(width: 32)
-            VStack(alignment: .leading, spacing: 2) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Theme.grad(isLocked ? Theme.locked : Theme.open))
+                    .frame(width: 48, height: 48)
+                    .shadow(color: (isLocked ? Theme.locked : Theme.open).opacity(0.35), radius: 6, y: 3)
+                Image(systemName: isLocked ? "lock.fill" : "lock.open.fill")
+                    .foregroundStyle(.white)
+                    .font(.title3.weight(.bold))
+            }
+            VStack(alignment: .leading, spacing: 3) {
                 Text(lock.displayName).font(.headline)
                 HStack(spacing: 6) {
                     if let serial = lock.serial_no { Text(serial) }
                     if lock.hasLocation {
-                        Label("locatie bekend", systemImage: "mappin.circle")
+                        Label("locatie", systemImage: "mappin.circle.fill")
                     }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+            Spacer()
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 }
 
