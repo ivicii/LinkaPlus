@@ -650,7 +650,12 @@ struct LockDetailView: View {
     }
 
     private func startBLE() async {
-        guard !bleStarted, let serial = lock.serial_no else { return }
+        guard let serial = lock.serial_no else { return }
+        // On reappear the view (and its keys) may be reused → just re-scan.
+        if bleStarted {
+            if !ble.ready { ble.start() }
+            return
+        }
         bleStarted = true
         bleKeyError = nil
         var keys: AccessKeys?
