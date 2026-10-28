@@ -15,16 +15,24 @@ jobs:
       - name: Fetch LINKA docs and post as commit comment
         run: |
           urls="
-          https://docs.linkalock.com/llms.txt
-          https://docs.linkalock.com/docs/leo-2-leo-2-pro/cellular-connectivity-and-gps-tracking/use-cases
-          https://docs.linkalock.com/docs/leo-2-leo-2-pro/cellular-connectivity-and-gps-tracking/power-modes
-          https://docs.linkalock.com/docs/leo-2-leo-2-pro/cellular-connectivity-and-gps-tracking/remote-control
+          https://docs.linkalock.com/docs/api-docs/overview-and-setup.md
+          https://docs.linkalock.com/docs/api-docs/rest-api/remote-commands.md
+          https://docs.linkalock.com/docs/api-docs/rest-api/response-codes.md
+          https://docs.linkalock.com/docs/api-docs/rest-api/cellular-and-gps-setup.md
+          https://docs.linkalock.com/docs/api-docs/rest-api/authentication.md
+          https://docs.linkalock.com/docs/billing/quick-start.md
           "
           out=/tmp/docs.md
           : > "$out"
           for u in $urls; do
+            echo "=====================================================" >> "$out"
             echo "### $u" >> "$out"
-            curl -fsSL "$u" 2>/dev/null | python3 -c "import sys,re,html; t=sys.stdin.read(); t=re.sub(r'<script.*?</script>',' ',t,flags=re.S); t=re.sub(r'<style.*?</style>',' ',t,flags=re.S); t=re.sub(r'<[^>]+>',' ',t); t=html.unescape(t); t=re.sub(r'\s+',' ',t); print(t[:7000])" >> "$out" 2>/dev/null || echo "(fetch failed)" >> "$out"
+            body=$(curl -fsSL "$u" 2>/dev/null || echo "(fetch failed)")
+            # .md URLs return clean markdown; keep raw (capped). Others: strip tags.
+            case "$u" in
+              *.md) printf "%s" "$body" | head -c 6000 >> "$out" ;;
+              *) printf "%s" "$body" | python3 -c "import sys,re,html; t=sys.stdin.read(); t=re.sub(r'<[^>]+>',' ',t); t=html.unescape(t); print(re.sub(r'\s+',' ',t)[:5000])" >> "$out" ;;
+            esac
             echo "" >> "$out"
           done
-          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -f body="$(head -c 60000 "$out")" >/dev/null && echo "posted"
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -f body="$(head -c 63000 "$out")" >/dev/null && echo "posted"
