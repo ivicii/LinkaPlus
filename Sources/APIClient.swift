@@ -166,6 +166,13 @@ struct APIClient {
         _ = try await sendExpectingStatus(req)
     }
 
+    func getCards(auth: Identity) async throws -> [SavedCard] {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/payments_consumer/stripe/get_cards"))
+        req.httpMethod = "POST"
+        authorize(&req, auth: auth)
+        return try await decodeArray(req, as: SavedCard.self)
+    }
+
     func createSetupIntent(auth: Identity) async throws -> SetupIntentData {
         var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/payments_consumer/stripe/create_setup_intent"))
         req.httpMethod = "POST"

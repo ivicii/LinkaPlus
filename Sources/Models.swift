@@ -120,6 +120,17 @@ struct SetupIntentData: Decodable {
     let ephemeralKey: String?
 }
 
+struct SavedCard: Decodable {
+    struct Card: Decodable {
+        let brand: String?
+        let last4: String?
+        let exp_month: Int?
+        let exp_year: Int?
+    }
+    let card: Card?
+    let id: String?
+}
+
 // MARK: - SIM / data-plan status (from activate_sim_consumer)
 
 struct DataUsage: Decodable {

@@ -25,6 +25,7 @@ struct LockDetailView: View {
     @State private var simLoading = false
     @State private var simError: String?
     @State private var showRenew = false
+    @State private var cards: [SavedCard] = []
 
     @StateObject private var loc = LocationProvider()
 
@@ -122,6 +123,9 @@ struct LockDetailView: View {
                     }
                     if let c = sim.country, !c.isEmpty {
                         statusRow("Land", value: c, systemImage: "globe.europe.africa")
+                    }
+                    if let card = cards.first?.card {
+                        statusRow("Kaart", value: cardText(card), systemImage: "creditcard")
                     }
                     if sim.payment_requires_attention == true {
                         Label("Betaling vereist", systemImage: "exclamationmark.triangle.fill")
@@ -302,6 +306,16 @@ struct LockDetailView: View {
 
     private func boolText(_ b: Bool?) -> String { b == true ? "Ja" : (b == false ? "Nee" : "–") }
 
+    private func cardText(_ c: SavedCard.Card) -> String {
+        let brand = (c.brand ?? "Kaart").capitalized
+        let last4 = c.last4 ?? "----"
+        var s = "\(brand) •••• \(last4)"
+        if let m = c.exp_month, let y = c.exp_year {
+            s += String(format: "  %02d/%02d", m, y % 100)
+        }
+        return s
+    }
+
     private func mb(_ bytes: Int) -> String {
         let m = Double(bytes) / 1_000_000
         if m >= 1 { return String(format: "%.1f MB", m) }
@@ -336,6 +350,7 @@ struct LockDetailView: View {
             } catch {
                 simError = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error)"
             }
+            cards = (try? await api.getCards(auth: session.identity())) ?? cards
             simLoading = false
         }
     }
