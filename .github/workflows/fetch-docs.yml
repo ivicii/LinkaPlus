@@ -15,7 +15,10 @@ jobs:
       - name: Fetch LINKA docs and post as commit comment
         run: |
           urls="
-          https://docs.linkalock.com/docs/leo-2-leo-2-pro/cellular-connectivity-and-gps-tracking/cellular-and-gps-introduction
+          https://docs.linkalock.com/llms.txt
+          https://docs.linkalock.com/docs/leo-2-leo-2-pro/cellular-connectivity-and-gps-tracking/use-cases
+          https://docs.linkalock.com/docs/leo-2-leo-2-pro/cellular-connectivity-and-gps-tracking/power-modes
+          https://docs.linkalock.com/docs/leo-2-leo-2-pro/cellular-connectivity-and-gps-tracking/remote-control
           "
           out=/tmp/docs.md
           : > "$out"
