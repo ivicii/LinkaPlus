@@ -95,10 +95,14 @@ struct StatsView: View {
                         Text("Te weinig batterijgegevens voor een grafiek.").foregroundStyle(.secondary).font(.caption)
                     } else {
                         Chart(batteryPoints) { p in
-                            LineMark(x: .value("Tijd", p.date), y: .value("Batterij", p.pct))
-                                .foregroundStyle(.green)
                             AreaMark(x: .value("Tijd", p.date), y: .value("Batterij", p.pct))
                                 .foregroundStyle(.green.opacity(0.12))
+                            LineMark(x: .value("Tijd", p.date), y: .value("Batterij", p.pct))
+                                .foregroundStyle(.green)
+                                .interpolationMethod(.monotone)
+                            PointMark(x: .value("Tijd", p.date), y: .value("Batterij", p.pct))
+                                .foregroundStyle(.green)
+                                .symbolSize(60)
                         }
                         .chartYScale(domain: 0...100)
                         .frame(height: 160)

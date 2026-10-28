@@ -32,8 +32,22 @@ struct LockDetailView: View {
     @State private var showSharing = false
     @State private var showRename = false
     @State private var renameText = ""
+    @State private var showSettings = false
+    @State private var showFullMap = false
 
     private var liveLocked: Bool { ble.liveLocked ?? lock.is_locked ?? true }
+
+    /// The lock state we actually know from Bluetooth (nil = not yet known).
+    private var knownLocked: Bool? { ble.liveLocked }
+
+    private var statusText: String {
+        guard let k = knownLocked else { return "Onbekend" }
+        return k ? "Vergrendeld" : "Ontgrendeld"
+    }
+    private var statusIcon: String {
+        guard let k = knownLocked else { return "questionmark.circle" }
+        return k ? "lock.fill" : "lock.open.fill"
+    }
 
     @State private var sim: SimStatus?
     @State private var simLoading = false
@@ -72,55 +86,118 @@ struct LockDetailView: View {
 
     var body: some View {
         List {
-            Section {
-                mapView
-                    .frame(height: 220)
-                    .listRowInsets(EdgeInsets())
-            } footer: {
-                if let d = lastLocationDate {
-                    Label("Locatie bijgewerkt: \(DateUtils.absoluteWithRelative(d))",
-                          systemImage: "clock.arrow.circlepath")
-                } else {
-                    Text("Tijd van laatste locatie onbekend.")
-                }
-            }
+            mapSection
 
             bleControlSection
 
-            Section("Status") {
-                statusRow(
-                    "Slot",
-                    value: liveLocked ? "Vergrendeld" : "Ontgrendeld",
-                    systemImage: liveLocked ? "lock.fill" : "lock.open.fill"
-                )
-                if let battery = latestBattery {
-                    HStack {
-                        Label("Batterij", systemImage: batteryIcon(battery))
-                        Spacer()
-                        Text("\(battery)%" + (battery < 20 ? "  ⚠︎ laag" : ""))
-                            .foregroundStyle(battery < 20 ? .red : .secondary)
-                    }
-                }
-                if let distanceText {
-                    statusRow("Afstand tot slot", value: distanceText, systemImage: "location.fill")
-                }
-                if let serial = lock.serial_no {
-                    statusRow("Serienummer", value: serial, systemImage: "number")
-                }
-                if let coordinate {
-                    statusRow(
-                        "Coördinaten",
-                        value: String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude),
-                        systemImage: "mappin.and.ellipse"
-                    )
-                    Button {
-                        openInMaps(coordinate)
-                    } label: {
-                        Label("Open in Kaarten / routebeschrijving", systemImage: "car.fill")
-                    }
+            soundSection
+        }
+        .navigationTitle(lock.displayName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showSettings = true } label: {
+                    Image(systemName: "slider.horizontal.3")
                 }
             }
+        }
+        .navigationDestination(isPresented: $showSettings) { settingsPage }
+        .task {
+            loc.start()
+            await startBLE()
+            await load()
+            await syncRecoveryState()
+            loadSim()
+        }
+        .onDisappear { ble.stop() }
+        .refreshable {
+            await load()
+            await syncRecoveryState()
+            loadSim()
+        }
+        .alert("Tracking-/recovery-modus aanzetten?", isPresented: $confirmEnable) {
+            Button("Annuleer", role: .cancel) {}
+            Button("Aanzetten", role: .destructive) { setRecovery(true) }
+        } message: {
+            Text("Dit is de anti-diefstalstand. Je slot gaat continu zijn GPS-positie doorsturen (meer batterij- en dataverbruik). Je kunt het weer uitzetten.")
+        }
+        .sheet(isPresented: $showFullMap) { fullMapSheet }
+        .sheet(isPresented: $showBLE) {
+            BLEDiagnosticsView(lockName: lock.displayName)
+        }
+        .sheet(isPresented: $showBLEControl) {
+            if let serial = lock.serial_no {
+                BLEControlView(serial: serial, lockName: lock.displayName)
+                    .environmentObject(session)
+            }
+        }
+        .sheet(isPresented: $showRenew) {
+            if let serial = lock.serial_no {
+                RenewDataPlanView(serial: serial, onActivated: { loadSim() })
+                    .environmentObject(session)
+            }
+        }
+        .sheet(isPresented: $showFinder) {
+            FindLockView(ble: ble, onSiren: { if ble.ready { ble.sirenOn() } else { playSiren() } })
+        }
+        .sheet(isPresented: $showStats) {
+            StatsView(activities: activities, lockName: lock.displayName)
+        }
+        .sheet(isPresented: $showSharing) {
+            if let serial = lock.serial_no {
+                SharingView(serial: serial).environmentObject(session)
+            }
+        }
+        .alert("Slot hernoemen", isPresented: $showRename) {
+            TextField("Naam", text: $renameText)
+            Button("Annuleer", role: .cancel) {}
+            Button("Opslaan") { renameLock() }
+        } message: {
+            Text("Nieuwe naam voor dit slot (in de cloud).")
+        }
+    }
 
+    // MARK: - Secondary sections (settings)
+
+    @ViewBuilder
+    private var statusSection: some View {
+        Section("Status") {
+            statusRow(
+                "Slot",
+                value: statusText,
+                systemImage: statusIcon
+            )
+            if let battery = latestBattery {
+                HStack {
+                    Label("Batterij", systemImage: batteryIcon(battery))
+                    Spacer()
+                    Text("\(battery)%" + (battery < 20 ? "  ⚠︎ laag" : ""))
+                        .foregroundStyle(battery < 20 ? .red : .secondary)
+                }
+            }
+            if let distanceText {
+                statusRow("Afstand tot slot", value: distanceText, systemImage: "location.fill")
+            }
+            if let serial = lock.serial_no {
+                statusRow("Serienummer", value: serial, systemImage: "number")
+            }
+            if let coordinate {
+                statusRow(
+                    "Coördinaten",
+                    value: String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude),
+                    systemImage: "mappin.and.ellipse"
+                )
+                Button {
+                    openInMaps(coordinate)
+                } label: {
+                    Label("Open in Kaarten / routebeschrijving", systemImage: "car.fill")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var dataplanSection: some View {
             Section {
                 if let sim {
                     statusRow("Verbonden", value: boolText(sim.connected),
@@ -183,172 +260,221 @@ struct LockDetailView: View {
             } footer: {
                 Text("Haalt de cellulaire status op (zelfde call als de officiële app gebruikt). Betalen gebeurt apart; dit vraagt alleen de status op.")
             }
+    }
 
-            Section {
-                if ble.ready {
-                    Button { ble.sirenOn() } label: { Label("Sirene aan", systemImage: "speaker.wave.3.fill") }
-                    Button(role: .destructive) { ble.sirenOff() } label: { Label("Sirene uit", systemImage: "speaker.slash.fill") }
-                } else {
-                    Button(action: playSiren) {
-                        HStack {
-                            if sirenBusy { ProgressView() }
-                            Label("Sirene via cloud (vereist dataplan)", systemImage: "speaker.wave.3.fill")
-                        }
-                    }
-                    .disabled(sirenBusy || lock.serial_no == nil)
-                    if let sirenMessage { Text(sirenMessage).font(.caption).foregroundStyle(.secondary) }
-                }
-            } header: {
-                Text("Vinden")
-            } footer: {
-                Text(ble.ready ? "Via Bluetooth — werkt lokaal, ook zonder dataplan." : "")
+    @ViewBuilder
+    private var slotinstellingenSection: some View {
+        Section {
+            Toggle(isOn: $movementAlarmOn) {
+                Label("Beweeg-alarm", systemImage: "bell.badge")
             }
+            .onChange(of: movementAlarmOn) { on in ble.setMovementAlarm(on) }
 
-            if ble.ready {
-                Section {
-                    Toggle(isOn: $movementAlarmOn) {
-                        Label("Beweeg-alarm", systemImage: "bell.badge")
-                    }
-                    .onChange(of: movementAlarmOn) { on in ble.setMovementAlarm(on) }
+            HStack {
+                Label("PAC-code", systemImage: "number.square")
+                Spacer()
+                TextField("4 cijfers", text: $pacCode)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 100)
+            }
+            Button {
+                if let code = Int(pacCode) { ble.setPAC(code) }
+            } label: { Label("PAC-code instellen", systemImage: "checkmark.circle") }
+                .disabled(pacCode.count < 4)
+        } header: {
+            Text("Slotinstellingen (Bluetooth)")
+        } footer: {
+            Text("Beweeg-alarm laat het slot waarschuwen bij beweging. De PAC-code is de tapcode om zonder telefoon te openen.")
+        }
+    }
 
+    @ViewBuilder
+    private var trackingSection: some View {
+        Section {
+            if recoveryOn {
+                Button(role: .destructive) { setRecovery(false) } label: {
                     HStack {
-                        Label("PAC-code", systemImage: "number.square")
-                        Spacer()
-                        TextField("4 cijfers", text: $pacCode)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 100)
+                        if recoveryBusy { ProgressView() }
+                        Label("Stop tracking (recovery)", systemImage: "stop.circle.fill")
                     }
-                    Button {
-                        if let code = Int(pacCode) { ble.setPAC(code) }
-                    } label: { Label("PAC-code instellen", systemImage: "checkmark.circle") }
-                        .disabled(pacCode.count < 4)
-                } header: {
-                    Text("Slotinstellingen (Bluetooth)")
-                } footer: {
-                    Text("Beweeg-alarm laat het slot waarschuwen bij beweging. De PAC-code is de tapcode om zonder telefoon te openen.")
                 }
-            }
-
-            Section {
-                if recoveryOn {
-                    Button(role: .destructive) { setRecovery(false) } label: {
-                        HStack {
-                            if recoveryBusy { ProgressView() }
-                            Label("Stop tracking (recovery)", systemImage: "stop.circle.fill")
-                        }
-                    }
-                    .disabled(recoveryBusy)
-                    Button {
-                        Task { await refreshRoute() }
-                    } label: {
-                        Label("Route verversen (\(routePoints.count) punten)", systemImage: "arrow.clockwise")
-                    }
-                } else {
-                    Button { confirmEnable = true } label: {
-                        HStack {
-                            if recoveryBusy { ProgressView() }
-                            Label("Zet in tracking-/recovery-modus", systemImage: "dot.radiowaves.left.and.right")
-                        }
-                    }
-                    .disabled(recoveryBusy || lock.serial_no == nil)
-                }
-                if let recoveryMessage {
-                    Text(recoveryMessage).font(.caption).foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Live tracking")
-            } footer: {
-                Text("Recovery-modus is de anti-diefstalstand: het slot stuurt dan continu zijn GPS-positie door (verbruikt meer batterij en dataplan). De afgelegde route verschijnt op de kaart.")
-            }
-
-            Section("Beheer") {
-                Button { showStats = true } label: { Label("Statistieken", systemImage: "chart.bar.fill") }
-                Button { showSharing = true } label: { Label("Delen & toegang", systemImage: "person.2.fill") }
-                Button { renameText = lock.displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
-            }
-
-            Section {
+                .disabled(recoveryBusy)
                 Button {
-                    showBLEControl = true
+                    Task { await refreshRoute() }
                 } label: {
-                    Label("Geavanceerde bediening & auto-test", systemImage: "slider.horizontal.3")
+                    Label("Route verversen (\(routePoints.count) punten)", systemImage: "arrow.clockwise")
                 }
-                Button {
-                    showBLE = true
-                } label: {
-                    Label("Bluetooth-diagnose", systemImage: "dot.radiowaves.right")
+            } else {
+                Button { confirmEnable = true } label: {
+                    HStack {
+                        if recoveryBusy { ProgressView() }
+                        Label("Zet in tracking-/recovery-modus", systemImage: "dot.radiowaves.left.and.right")
+                    }
                 }
-            } header: {
-                Text("Geavanceerd")
-            } footer: {
-                Text("Alleen nodig als de normale Open/Sluit niet werkt: handmatige sleutel/kanaal/teller en het GATT-profiel.")
+                .disabled(recoveryBusy || lock.serial_no == nil)
             }
+            if let recoveryMessage {
+                Text(recoveryMessage).font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Live tracking")
+        } footer: {
+            Text("Recovery-modus is de anti-diefstalstand: het slot stuurt dan continu zijn GPS-positie door (verbruikt meer batterij en dataplan). De afgelegde route verschijnt op de kaart.")
+        }
+    }
 
-            Section("Activiteiten") {
-                if busy && activities.isEmpty {
-                    HStack { ProgressView(); Text("Laden…").foregroundStyle(.secondary) }
-                } else if activities.isEmpty {
-                    Text(error ?? "Nog geen activiteiten.").foregroundStyle(.secondary)
+    @ViewBuilder
+    private var beheerSection: some View {
+        Section("Beheer") {
+            Button { showStats = true } label: { Label("Statistieken", systemImage: "chart.bar.fill") }
+            Button { showSharing = true } label: { Label("Delen & toegang", systemImage: "person.2.fill") }
+            Button { renameText = lock.displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
+        }
+    }
+
+    @ViewBuilder
+    private var geavanceerdSection: some View {
+        Section {
+            Button {
+                showBLEControl = true
+            } label: {
+                Label("Geavanceerde bediening & auto-test", systemImage: "slider.horizontal.3")
+            }
+            Button {
+                showBLE = true
+            } label: {
+                Label("Bluetooth-diagnose", systemImage: "dot.radiowaves.right")
+            }
+        } header: {
+            Text("Geavanceerd")
+        } footer: {
+            Text("Alleen nodig als de normale Open/Sluit niet werkt: handmatige sleutel/kanaal/teller en het GATT-profiel.")
+        }
+    }
+
+    @ViewBuilder
+    private var activiteitenSection: some View {
+        Section("Activiteiten") {
+            if busy && activities.isEmpty {
+                HStack { ProgressView(); Text("Laden…").foregroundStyle(.secondary) }
+            } else if activities.isEmpty {
+                Text(error ?? "Nog geen activiteiten.").foregroundStyle(.secondary)
+            } else {
+                ForEach(activities) { ActivityRow(activity: $0) }
+            }
+        }
+    }
+
+    // MARK: - Main sections
+
+    @ViewBuilder
+    private var mapSection: some View {
+        Section {
+            Button { showFullMap = true } label: {
+                mapView
+                    .frame(height: 220)
+                    .overlay(alignment: .topTrailing) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(.primary)
+                            .padding(8)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .padding(10)
+                    }
+            }
+            .buttonStyle(.plain)
+            .listRowInsets(EdgeInsets())
+        } footer: {
+            if let d = lastLocationDate {
+                Label("Locatie bijgewerkt: \(DateUtils.absoluteWithRelative(d)) · tik om te vergroten",
+                      systemImage: "clock.arrow.circlepath")
+            } else {
+                Text("Tijd van laatste locatie onbekend. Tik op de kaart om te vergroten.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var soundSection: some View {
+        Section {
+            if ble.ready {
+                Button { Haptic.tap(); ble.sirenOn() } label: {
+                    Label("Geluid afspelen", systemImage: "speaker.wave.3.fill")
+                }
+                Button(role: .destructive) { ble.sirenOff() } label: {
+                    Label("Geluid uit", systemImage: "speaker.slash.fill")
+                }
+            } else {
+                Button(action: playSiren) {
+                    HStack {
+                        if sirenBusy { ProgressView() }
+                        Label("Geluid via cloud (vereist dataplan)", systemImage: "speaker.wave.3.fill")
+                    }
+                }
+                .disabled(sirenBusy || lock.serial_no == nil)
+                if let sirenMessage { Text(sirenMessage).font(.caption).foregroundStyle(.secondary) }
+            }
+        } header: {
+            Text("Geluid")
+        } footer: {
+            Text(ble.ready ? "Via Bluetooth — werkt lokaal, ook zonder dataplan." : "Speelt het geluid/sirene op je slot af.")
+        }
+    }
+
+    @ViewBuilder
+    private var fullMapSheet: some View {
+        NavigationStack {
+            Group {
+                if let coordinate {
+                    LockMapView(coordinate: coordinate, title: lock.displayName, route: routePoints)
+                        .ignoresSafeArea(edges: .bottom)
                 } else {
-                    ForEach(activities) { ActivityRow(activity: $0) }
+                    VStack(spacing: 8) {
+                        Image(systemName: "mappin.slash").font(.largeTitle)
+                        Text("Geen locatie bekend voor dit slot").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle(lock.displayName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Sluit") { showFullMap = false } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if let coordinate {
+                        Button { openInMaps(coordinate) } label: { Label("Route", systemImage: "car.fill") }
+                    }
                 }
             }
         }
-        .navigationTitle(lock.displayName)
+    }
+
+    // MARK: - Settings page
+
+    private var settingsPage: some View {
+        List {
+            statusSection
+            dataplanSection
+            if ble.ready { slotinstellingenSection }
+            trackingSection
+            beheerSection
+            geavanceerdSection
+            activiteitenSection
+            Section {
+                EmptyView()
+            } footer: {
+                VStack(spacing: 3) {
+                    Text("LinkaPlus v1.0")
+                    Text("Created by Ivo Rooijackers (IvoRoo)")
+                }
+                .font(.caption)
+                .frame(maxWidth: .infinity)
+                .foregroundStyle(.secondary)
+                .padding(.top, 6)
+            }
+        }
+        .navigationTitle("Instellingen")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            loc.start()
-            await startBLE()
-            await load()
-            await syncRecoveryState()
-            loadSim()
-        }
-        .onDisappear { ble.stop() }
-        .refreshable {
-            await load()
-            await syncRecoveryState()
-            loadSim()
-        }
-        .alert("Tracking-/recovery-modus aanzetten?", isPresented: $confirmEnable) {
-            Button("Annuleer", role: .cancel) {}
-            Button("Aanzetten", role: .destructive) { setRecovery(true) }
-        } message: {
-            Text("Dit is de anti-diefstalstand. Je slot gaat continu zijn GPS-positie doorsturen (meer batterij- en dataverbruik). Je kunt het weer uitzetten.")
-        }
-        .sheet(isPresented: $showBLE) {
-            BLEDiagnosticsView(lockName: lock.displayName)
-        }
-        .sheet(isPresented: $showBLEControl) {
-            if let serial = lock.serial_no {
-                BLEControlView(serial: serial, lockName: lock.displayName)
-                    .environmentObject(session)
-            }
-        }
-        .sheet(isPresented: $showRenew) {
-            if let serial = lock.serial_no {
-                RenewDataPlanView(serial: serial, onActivated: { loadSim() })
-                    .environmentObject(session)
-            }
-        }
-        .sheet(isPresented: $showFinder) {
-            FindLockView(ble: ble, onSiren: { if ble.ready { ble.sirenOn() } else { playSiren() } })
-        }
-        .sheet(isPresented: $showStats) {
-            StatsView(activities: activities, lockName: lock.displayName)
-        }
-        .sheet(isPresented: $showSharing) {
-            if let serial = lock.serial_no {
-                SharingView(serial: serial).environmentObject(session)
-            }
-        }
-        .alert("Slot hernoemen", isPresented: $showRename) {
-            TextField("Naam", text: $renameText)
-            Button("Annuleer", role: .cancel) {}
-            Button("Opslaan") { renameLock() }
-        } message: {
-            Text("Nieuwe naam voor dit slot (in de cloud).")
-        }
     }
 
     // MARK: Bluetooth control card
@@ -366,11 +492,22 @@ struct LockDetailView: View {
 
     // MARK: Hero control
 
-    private var heroColor: Color { liveLocked ? Theme.locked : Theme.open }
+    /// Colour reflects the KNOWN state: green = vergrendeld, orange = ontgrendeld,
+    /// blue = nog onbekend (tot het slot of een actie de stand bevestigt).
+    private var heroColor: Color {
+        guard let k = knownLocked else { return Theme.accent }
+        return k ? Theme.locked : Theme.open
+    }
+
+    private var heroIcon: String {
+        guard let k = knownLocked else { return "questionmark" }
+        return k ? "lock.fill" : "lock.open.fill"
+    }
 
     private var heroSubtitle: String {
         if !ble.ready { return bleStatusText }
-        return liveLocked ? "Tik om te openen" : "Tik om te sluiten"
+        guard let k = knownLocked else { return "Status onbekend" }
+        return k ? "Tik om te openen" : "Tik om te sluiten"
     }
 
     private var heroControl: some View {
@@ -391,8 +528,13 @@ struct LockDetailView: View {
             // Big tactile lock button
             Button {
                 Haptic.tap()
+                guard let locked = knownLocked else {
+                    // State unknown → nudge the user to the explicit buttons.
+                    Haptic.warning()
+                    return
+                }
                 ble.channel = 0; ble.counterOffset = 0
-                if liveLocked { ble.unlock() } else { ble.lock() }
+                if locked { ble.unlock() } else { ble.lock() }
             } label: {
                 ZStack {
                     Circle()
@@ -403,7 +545,7 @@ struct LockDetailView: View {
                         .stroke(Color.white.opacity(0.22), lineWidth: 2)
                         .frame(width: 184, height: 184)
                     VStack(spacing: 10) {
-                        Image(systemName: liveLocked ? "lock.fill" : "lock.open.fill")
+                        Image(systemName: heroIcon)
                             .font(.system(size: 58, weight: .bold))
                         Text(heroSubtitle)
                             .font(.footnote.weight(.semibold))
@@ -415,12 +557,11 @@ struct LockDetailView: View {
             .buttonStyle(PressableStyle())
             .disabled(!ble.ready)
             .opacity(ble.ready ? 1 : 0.55)
-            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: liveLocked)
+            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: knownLocked)
 
             // Quick stats
             HStack(spacing: 22) {
-                heroStat(liveLocked ? "Vergrendeld" : "Open",
-                         liveLocked ? "lock.fill" : "lock.open.fill", heroColor)
+                heroStat(statusText, statusIcon, heroColor)
                 if let b = latestBattery {
                     heroStat("\(b)%", batteryIcon(b), b < 20 ? Theme.danger : .secondary)
                 }
@@ -429,6 +570,12 @@ struct LockDetailView: View {
                 }
             }
             .font(.caption)
+
+            if knownLocked == nil && ble.ready {
+                Text("Kies hieronder Openen of Sluiten — de stand wordt daarna automatisch bijgehouden.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
 
             commandResultRow
         }

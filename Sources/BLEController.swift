@@ -154,6 +154,9 @@ final class BLEController: NSObject, ObservableObject {
             lastEvent = "geblokkeerd / beweging (stall)"
         } else if s.contains("Motor Open") || s.contains("Motor Close") {
             lastEvent = s
+            // The motor log reports the real actuation → trust it for live state.
+            if s.contains("Motor Open")  { liveLocked = false }
+            if s.contains("Motor Close") { liveLocked = true }
         }
     }
 
