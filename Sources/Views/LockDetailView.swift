@@ -10,6 +10,9 @@ struct LockDetailView: View {
     @State private var busy = false
     @State private var error: String?
 
+    @State private var sirenBusy = false
+    @State private var sirenMessage: String?
+
     // iOS 16-compatible map region.
     @State private var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 52.0, longitude: 5.0),
@@ -65,6 +68,19 @@ struct LockDetailView: View {
                 }
             }
 
+            Section("Vinden") {
+                Button(action: playSiren) {
+                    HStack {
+                        if sirenBusy { ProgressView() }
+                        Label("Laat geluid afspelen (sirene)", systemImage: "speaker.wave.3.fill")
+                    }
+                }
+                .disabled(sirenBusy || lock.serial_no == nil)
+                if let sirenMessage {
+                    Text(sirenMessage).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
             Section("Activiteiten") {
                 if busy && activities.isEmpty {
                     HStack { ProgressView(); Text("Laden…").foregroundStyle(.secondary) }
@@ -84,7 +100,8 @@ struct LockDetailView: View {
     @ViewBuilder
     private var mapView: some View {
         if let coordinate {
-            Map(coordinateRegion: $region, annotationItems: [MapPin(coordinate: coordinate)]) { pin in
+            Map(coordinateRegion: $region,
+                annotationItems: [MapPin(id: lock.serial_no ?? lock._id, coordinate: coordinate)]) { pin in
                 MapMarker(coordinate: pin.coordinate, tint: .red)
             }
             .onAppear {
@@ -130,6 +147,21 @@ struct LockDetailView: View {
         item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
     }
 
+    private func playSiren() {
+        guard let serial = lock.serial_no else { return }
+        sirenBusy = true
+        sirenMessage = nil
+        Task {
+            do {
+                try await api.activateSiren(serial: serial, auth: session.identity())
+                sirenMessage = "Sirene geactiveerd — luister naar je slot."
+            } catch {
+                sirenMessage = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error)"
+            }
+            sirenBusy = false
+        }
+    }
+
     private func load() async {
         guard let serial = lock.serial_no else { return }
         busy = true; error = nil
@@ -144,7 +176,7 @@ struct LockDetailView: View {
 }
 
 struct MapPin: Identifiable {
-    let id = UUID()
+    let id: String
     let coordinate: CLLocationCoordinate2D
 }
 

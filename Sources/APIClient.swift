@@ -117,6 +117,15 @@ struct APIClient {
         return try await decodeArray(req, as: Lock.self).first
     }
 
+    /// Play the lock's siren so you can locate it (LEO cellular feature).
+    func activateSiren(serial: String, auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/leo/activate_siren"))
+        req.httpMethod = "POST"
+        setForm(["lock_serial_no": serial], on: &req)
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
     func fetchActivities(serial: String, auth: Identity) async throws -> [LockActivity] {
         var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/activitys/fetch"))
         req.httpMethod = "PUT"
