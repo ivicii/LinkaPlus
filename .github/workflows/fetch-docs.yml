@@ -1,0 +1,27 @@
+name: Fetch docs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch LINKA docs and post as commit comment
+        run: |
+          urls="
+          https://docs.linkalock.com/docs/leo-2-leo-2-pro/cellular-connectivity-and-gps-tracking/cellular-and-gps-introduction
+          "
+          out=/tmp/docs.md
+          : > "$out"
+          for u in $urls; do
+            echo "### $u" >> "$out"
+            curl -fsSL "$u" 2>/dev/null | python3 -c "import sys,re,html; t=sys.stdin.read(); t=re.sub(r'<script.*?</script>',' ',t,flags=re.S); t=re.sub(r'<style.*?</style>',' ',t,flags=re.S); t=re.sub(r'<[^>]+>',' ',t); t=html.unescape(t); t=re.sub(r'\s+',' ',t); print(t[:7000])" >> "$out" 2>/dev/null || echo "(fetch failed)" >> "$out"
+            echo "" >> "$out"
+          done
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -f body="$(head -c 60000 "$out")" >/dev/null && echo "posted"
