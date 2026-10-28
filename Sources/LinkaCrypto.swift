@@ -91,6 +91,17 @@ enum LinkaCrypto {
         return frame
     }
 
+    /// Payload for a WRITE-setting packet (pc/i: VCMD_SET_SETTING).
+    /// [0x03, idx, value LE(4), value2 LE(4), 0,0,0]  → 13 bytes.
+    static func settingPayload(idx: Int, value: Int) -> [UInt8] {
+        var p: [UInt8] = [0x03, UInt8(idx & 0xff)]
+        let v = UInt32(bitPattern: Int32(truncatingIfNeeded: value))
+        p += [UInt8(v & 0xff), UInt8((v >> 8) & 0xff), UInt8((v >> 16) & 0xff), UInt8((v >> 24) & 0xff)]
+        p += [0, 0, 0, 0]   // value2
+        p += [0, 0, 0]      // padding to 13
+        return p
+    }
+
     // MARK: Status frame parse (pc/e) — encVer = byte[2], counter = int32 LE at [3..6]
     static func parseStatus(_ frame: [UInt8]) -> (encVer: Int, counter: UInt32)? {
         guard frame.count >= 7 else { return nil }

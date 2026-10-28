@@ -26,6 +26,10 @@ struct LockDetailView: View {
     @State private var bleStarted = false
     @State private var bleKeyError: String?
     @State private var showFinder = false
+    @State private var movementAlarmOn = false
+    @State private var pacCode = ""
+
+    private var liveLocked: Bool { ble.liveLocked ?? lock.is_locked ?? true }
 
     @State private var sim: SimStatus?
     @State private var simLoading = false
@@ -82,8 +86,8 @@ struct LockDetailView: View {
             Section("Status") {
                 statusRow(
                     "Slot",
-                    value: (lock.is_locked ?? true) ? "Vergrendeld" : "Ontgrendeld",
-                    systemImage: (lock.is_locked ?? true) ? "lock.fill" : "lock.open.fill"
+                    value: liveLocked ? "Vergrendeld" : "Ontgrendeld",
+                    systemImage: liveLocked ? "lock.fill" : "lock.open.fill"
                 )
                 if let battery = latestBattery {
                     HStack {
@@ -176,16 +180,49 @@ struct LockDetailView: View {
                 Text("Haalt de cellulaire status op (zelfde call als de officiële app gebruikt). Betalen gebeurt apart; dit vraagt alleen de status op.")
             }
 
-            Section("Vinden") {
-                Button(action: playSiren) {
-                    HStack {
-                        if sirenBusy { ProgressView() }
-                        Label("Laat geluid afspelen (sirene)", systemImage: "speaker.wave.3.fill")
+            Section {
+                if ble.ready {
+                    Button { ble.sirenOn() } label: { Label("Sirene aan", systemImage: "speaker.wave.3.fill") }
+                    Button(role: .destructive) { ble.sirenOff() } label: { Label("Sirene uit", systemImage: "speaker.slash.fill") }
+                } else {
+                    Button(action: playSiren) {
+                        HStack {
+                            if sirenBusy { ProgressView() }
+                            Label("Sirene via cloud (vereist dataplan)", systemImage: "speaker.wave.3.fill")
+                        }
                     }
+                    .disabled(sirenBusy || lock.serial_no == nil)
+                    if let sirenMessage { Text(sirenMessage).font(.caption).foregroundStyle(.secondary) }
                 }
-                .disabled(sirenBusy || lock.serial_no == nil)
-                if let sirenMessage {
-                    Text(sirenMessage).font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text("Vinden")
+            } footer: {
+                Text(ble.ready ? "Via Bluetooth — werkt lokaal, ook zonder dataplan." : "")
+            }
+
+            if ble.ready {
+                Section {
+                    Toggle(isOn: $movementAlarmOn) {
+                        Label("Beweeg-alarm", systemImage: "bell.badge")
+                    }
+                    .onChange(of: movementAlarmOn) { on in ble.setMovementAlarm(on) }
+
+                    HStack {
+                        Label("PAC-code", systemImage: "number.square")
+                        Spacer()
+                        TextField("4 cijfers", text: $pacCode)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 100)
+                    }
+                    Button {
+                        if let code = Int(pacCode) { ble.setPAC(code) }
+                    } label: { Label("PAC-code instellen", systemImage: "checkmark.circle") }
+                        .disabled(pacCode.count < 4)
+                } header: {
+                    Text("Slotinstellingen (Bluetooth)")
+                } footer: {
+                    Text("Beweeg-alarm laat het slot waarschuwen bij beweging. De PAC-code is de tapcode om zonder telefoon te openen.")
                 }
             }
 
@@ -285,7 +322,7 @@ struct LockDetailView: View {
             }
         }
         .sheet(isPresented: $showFinder) {
-            FindLockView(ble: ble, onSiren: { playSiren() })
+            FindLockView(ble: ble, onSiren: { if ble.ready { ble.sirenOn() } else { playSiren() } })
         }
     }
 

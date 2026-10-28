@@ -12,6 +12,8 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var ctxEncVer: Int?
     @Published private(set) var ctxCounter: UInt32?
     @Published private(set) var lockStateRaw: Int?
+    @Published private(set) var liveLocked: Bool?
+    @Published private(set) var movementAlarmOn: Bool?
     @Published private(set) var rssi: Int?
     @Published private(set) var lastEvent: String = "–"
     @Published private(set) var commandResult: CommandResult?
@@ -193,27 +195,39 @@ final class BLEController: NSObject, ObservableObject {
         return pow(10.0, (txPower - Double(r)) / (10.0 * n))
     }
 
-    func unlock() { send(cmd: 0, name: "UNLOCK") }
-    func lock()   { send(cmd: 1, name: "LOCK") }
+    func unlock() { sendPayload([0, 0], name: "Openen", expectActuation: true) { self.liveLocked = false } }
+    func lock()   { sendPayload([1, 0], name: "Sluiten", expectActuation: true) { self.liveLocked = true } }
+    func sirenOn()  { sendPayload([14, 60], name: "Sirene") }
+    func sirenOff() { sendPayload([20, 0], name: "Sirene uit") }
+    func setPAC(_ code: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 1, value: code), name: "PAC-code instellen")
+    }
+    func setMovementAlarm(_ on: Bool) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 106, value: on ? 5 : 0),
+                    name: on ? "Beweeg-alarm aan" : "Beweeg-alarm uit") { self.movementAlarmOn = on }
+    }
 
-    private func send(cmd: UInt8, name: String) {
+    private func sendPayload(_ payload: [UInt8], name: String, expectActuation: Bool = false, onSuccess: (() -> Void)? = nil) {
         let ch = (channel == 1) ? write0016 : write0002
-        guard let ch = ch else { add("Geen write-characteristic voor kanaal \(channel == 1 ? "0016" : "0002")."); return }
-        guard let c = ctxCounter else { add("Nog geen context-teller ontvangen (wacht op 0x12-frame)."); return }
+        guard let ch = ch else { add("Geen write-characteristic."); return }
+        guard let c = ctxCounter else { add("Nog geen context-teller (wacht op 0x12-frame)."); return }
         let useCounter = UInt32(truncatingIfNeeded: Int(c) + counterOffset)
-        let frame = LinkaCrypto.commandFrame(mac: mac, payload: [cmd, 0], subkey: subkey, priv: priv, counter: useCounter)
+        let frame = LinkaCrypto.commandFrame(mac: mac, payload: payload, subkey: subkey, priv: priv, counter: useCounter)
         let type: CBCharacteristicWriteType = ch.properties.contains(.write) ? .withResponse : .withoutResponse
         encAccepted = nil; vstateChanged = false; commandResult = nil
-        add("→ \(name) via \(channel == 1 ? "0016" : "0002") (ctr \(useCounter)): \(LinkaCrypto.toHex(frame))")
+        add("→ \(name) (ctr \(useCounter)): \(LinkaCrypto.toHex(frame))")
         peripheral?.writeValue(Data(frame), for: ch, type: type)
-        // Evaluate the outcome from the firmware feedback.
         Task {
             for _ in 0..<16 {
                 try? await Task.sleep(nanoseconds: 250_000_000)
-                if vstateChanged { commandResult = .success(name); return }
                 if encAccepted == false { commandResult = .rejected; return }
+                if expectActuation {
+                    if vstateChanged { commandResult = .success(name); onSuccess?(); return }
+                } else if encAccepted == true {
+                    commandResult = .success(name); onSuccess?(); return
+                }
             }
-            if encAccepted == true { commandResult = .blocked(name) }
+            if expectActuation && encAccepted == true { commandResult = .blocked(name) }
             else { commandResult = .timeout }
         }
     }
