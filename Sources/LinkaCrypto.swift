@@ -56,12 +56,13 @@ enum LinkaCrypto {
         return aesCBC(key: masterKey, iv: nonce, data: staticKey)
     }
 
-    // MARK: Command frame (pc/g.g) — payload is e.g. [cmd, param]
-    /// cmd: 0 = unlock, 1 = lock.
-    static func commandFrame(mac: [UInt8], payload: [UInt8], masterKey: [UInt8],
-                             priv: Priv, slot: Int, encVer: Int, counter: UInt32) -> [UInt8] {
+    // MARK: Command frame (pc/g.g with setSubkey) — payload is e.g. [cmd, param]
+    /// cmd: 0 = unlock, 1 = lock. `subkey` is the access key used directly
+    /// (the app calls setSubkey(key,1,priv), so f36009f==1 → flag bit 0x40,
+    /// and no master-key derivation is done).
+    static func commandFrame(mac: [UInt8], payload: [UInt8], subkey: [UInt8],
+                             priv: Priv, counter: UInt32) -> [UInt8] {
         let revMAC = (0..<6).map { mac[5 - $0] }   // bArr7[5-i] = mac[i]
-        let subkey = deriveSubkey(masterKey: masterKey, slot: slot, revMAC: revMAC, priv: priv, encVer: encVer)
 
         // payload block (16 bytes): [0x10, payload..., CRC]
         var block = [UInt8](repeating: 0, count: 16)
@@ -82,8 +83,7 @@ enum LinkaCrypto {
         // frame (20 bytes)
         var frame = [UInt8](repeating: 0, count: 20)
         frame[0] = 20
-        var flag: UInt8 = 0x80
-        if slot == 1 { flag |= 0x40 }
+        var flag: UInt8 = 0x80 | 0x40   // f36009f == 1
         if priv == .user { flag |= 0x10 }
         frame[1] = flag
         for i in 0..<16 { frame[2 + i] = (i < enc.count) ? enc[i] : 0 }

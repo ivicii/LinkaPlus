@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Phase-2 open/close over Bluetooth. Fetches the access key, connects, reads
-/// the live counter, and sends encrypted unlock/lock commands. Includes small
-/// knobs (slot, counter offset) so we can iterate against the real lock.
+/// Phase-2 open/close over Bluetooth, with knobs + a shareable log so we can
+/// iterate against the real lock.
 struct BLEControlView: View {
     let serial: String
     let lockName: String?
@@ -13,7 +12,7 @@ struct BLEControlView: View {
     @StateObject private var ble = BLEController()
     @State private var keyLoaded = false
     @State private var loadError: String?
-    @State private var slot = 0
+    @State private var channel = 0
     @State private var counterOffset = 0
 
     var body: some View {
@@ -21,22 +20,14 @@ struct BLEControlView: View {
             List {
                 Section {
                     HStack { Text("Status").bold(); Spacer(); Text(ble.state).foregroundStyle(.secondary) }
-                    HStack {
-                        Text("encVer"); Spacer()
-                        Text(ble.encVer.map(String.init) ?? "–").foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("Teller"); Spacer()
-                        Text(ble.counter.map(String.init) ?? "–").foregroundStyle(.secondary)
-                    }
+                    HStack { Text("Context encVer"); Spacer(); Text(ble.ctxEncVer.map(String.init) ?? "–").foregroundStyle(.secondary) }
+                    HStack { Text("Context teller"); Spacer(); Text(ble.ctxCounter.map(String.init) ?? "–").foregroundStyle(.secondary) }
                     if !keyLoaded {
                         Button { Task { await loadKeyAndStart() } } label: {
                             Label("Sleutel laden & verbinden", systemImage: "key.radiowaves.forward")
                         }
                     } else {
-                        Button { ble.start() } label: {
-                            Label("(Her)verbinden", systemImage: "arrow.clockwise")
-                        }
+                        Button { ble.start() } label: { Label("(Her)verbinden", systemImage: "arrow.clockwise") }
                     }
                     if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
                 } footer: {
@@ -45,27 +36,35 @@ struct BLEControlView: View {
 
                 Section("Bediening") {
                     Button {
-                        ble.slot = slot; ble.counterOffset = counterOffset; ble.unlock()
+                        ble.channel = channel; ble.counterOffset = counterOffset; ble.unlock()
                     } label: { Label("Open (unlock)", systemImage: "lock.open") }
                         .disabled(!ble.ready)
                     Button {
-                        ble.slot = slot; ble.counterOffset = counterOffset; ble.lock()
+                        ble.channel = channel; ble.counterOffset = counterOffset; ble.lock()
                     } label: { Label("Sluit (lock)", systemImage: "lock") }
                         .disabled(!ble.ready)
                 }
 
                 Section {
-                    Picker("Key slot", selection: $slot) {
-                        Text("SLOT1").tag(0); Text("SLOT2").tag(1)
+                    Picker("Schrijfkanaal", selection: $channel) {
+                        Text("D31E0002").tag(0); Text("D31E0016").tag(1)
                     }
-                    Stepper("Teller-offset: \(counterOffset)", value: $counterOffset, in: -1...2)
+                    Stepper("Teller-offset: \(counterOffset)", value: $counterOffset, in: -2...2)
                 } header: {
                     Text("Iteratie-opties")
                 } footer: {
-                    Text("Als unlock niet werkt, probeer SLOT2 of teller-offset +1. De respons verschijnt in de log.")
+                    Text("Werkt het niet, probeer kanaal D31E0016 of een teller-offset. Deel daarna de log.")
                 }
 
-                Section("Log") {
+                Section {
+                    ShareLink(item: ble.fullLog()) {
+                        Label("Deel log", systemImage: "square.and.arrow.up")
+                    }
+                } header: {
+                    Text("Log")
+                }
+
+                Section {
                     ForEach(Array(ble.log.enumerated()), id: \.offset) { _, line in
                         Text(line).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
                     }
@@ -85,10 +84,7 @@ struct BLEControlView: View {
         loadError = nil
         do {
             let status = try await api.checkKeyStatus(serial: serial, auth: session.identity())
-            guard let ck = status.key?.commandKey else {
-                loadError = "Geen bruikbare access-key gevonden."
-                return
-            }
+            guard let ck = status.key?.commandKey else { loadError = "Geen bruikbare access-key gevonden."; return }
             ble.configure(keyHex: ck.hex, admin: ck.admin, serial: serial, nameHint: lockName)
             keyLoaded = true
             ble.start()

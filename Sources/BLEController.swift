@@ -1,33 +1,34 @@
 import Foundation
 import CoreBluetooth
 
-/// Connects to the lock and sends encrypted open/close commands (Phase 2).
-/// Reads the live counter/encVer from the lock's status frames and builds the
-/// command packet with LinkaCrypto, then writes it to the data-RX characteristic.
+/// Phase-2 open/close over Bluetooth. Reads the live counter from the lock's
+/// context frame (0x12-prefixed, encVer 2) and builds the command with the
+/// access key used directly as the subkey (mirrors the app's setSubkey path).
 @MainActor
 final class BLEController: NSObject, ObservableObject {
 
     @Published private(set) var state = "idle"
-    @Published private(set) var ready = false        // connected + write char found
-    @Published private(set) var encVer: Int?
-    @Published private(set) var counter: UInt32?
+    @Published private(set) var ready = false
+    @Published private(set) var ctxEncVer: Int?
+    @Published private(set) var ctxCounter: UInt32?
     @Published private(set) var log: [String] = []
 
-    // Config (set before connecting)
-    private var masterKey: [UInt8] = []
+    private var subkey: [UInt8] = []
     private var mac: [UInt8] = []
     private var priv: LinkaCrypto.Priv = .admin
     private var nameHint: String?
-    var slot = 0            // 0 = SLOT1 (adjustable while iterating)
-    var counterOffset: Int = 0   // try +0 / +1 while iterating
+
+    /// 0 = D31E0002 (legacy), 1 = D31E0016 (newer V2 channel).
+    var channel = 0
+    var counterOffset = 0
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
-    private var writeChar: CBCharacteristic?
-    private var writeType: CBCharacteristicWriteType = .withResponse
+    private var write0002: CBCharacteristic?
+    private var write0016: CBCharacteristic?
 
     func configure(keyHex: String, admin: Bool, serial: String, nameHint: String?) {
-        masterKey = LinkaCrypto.hex(keyHex)
+        subkey = LinkaCrypto.hex(keyHex)
         mac = LinkaCrypto.macBytes(serial) ?? []
         priv = admin ? .admin : .user
         self.nameHint = nameHint
@@ -38,14 +39,16 @@ final class BLEController: NSObject, ObservableObject {
         central = CBCentralManager(delegate: self, queue: .main)
     }
 
+    func fullLog() -> String { log.reversed().joined(separator: "\n") }
+
     private func add(_ s: String) {
         log.insert(s, at: 0)
-        if log.count > 200 { log.removeLast() }
+        if log.count > 300 { log.removeLast() }
     }
 
     func start() {
-        guard masterKey.count == 16, mac.count == 6 else {
-            add("Config onvolledig (key \(masterKey.count)B, mac \(mac.count)B)."); return
+        guard subkey.count == 16, mac.count == 6 else {
+            add("Config onvolledig (key \(subkey.count)B, mac \(mac.count)B)."); return
         }
         guard central.state == .poweredOn else { add("Bluetooth niet aan."); return }
         state = "scannen"; ready = false
@@ -63,15 +66,14 @@ final class BLEController: NSObject, ObservableObject {
     func lock()   { send(cmd: 1, name: "LOCK") }
 
     private func send(cmd: UInt8, name: String) {
-        guard ready, let ch = writeChar, let c = counter, let ev = encVer else {
-            add("Niet klaar (geen statusframe/teller ontvangen)."); return
-        }
-        let useCounter = UInt32(Int(c) + counterOffset)
-        let frame = LinkaCrypto.commandFrame(
-            mac: mac, payload: [cmd, 0], masterKey: masterKey,
-            priv: priv, slot: slot, encVer: ev, counter: useCounter)
-        add("→ \(name) (ctr \(useCounter), encVer \(ev), slot \(slot)): \(LinkaCrypto.toHex(frame))")
-        peripheral?.writeValue(Data(frame), for: ch, type: writeType)
+        let ch = (channel == 1) ? write0016 : write0002
+        guard let ch = ch else { add("Geen write-characteristic voor kanaal \(channel == 1 ? "0016" : "0002")."); return }
+        guard let c = ctxCounter else { add("Nog geen context-teller ontvangen (wacht op 0x12-frame)."); return }
+        let useCounter = UInt32(truncatingIfNeeded: Int(c) + counterOffset)
+        let frame = LinkaCrypto.commandFrame(mac: mac, payload: [cmd, 0], subkey: subkey, priv: priv, counter: useCounter)
+        let type: CBCharacteristicWriteType = ch.properties.contains(.write) ? .withResponse : .withoutResponse
+        add("→ \(name) via \(channel == 1 ? "0016" : "0002") (ctr \(useCounter)): \(LinkaCrypto.toHex(frame))")
+        peripheral?.writeValue(Data(frame), for: ch, type: type)
     }
 }
 
@@ -85,9 +87,9 @@ extension BLEController: CBCentralManagerDelegate {
         Task { @MainActor in
             guard let name = name else { return }
             let hint = nameHint?.lowercased()
-            let lock = name.lowercased().contains("linka") || name.lowercased().contains("leo")
+            let isLock = name.lowercased().contains("linka") || name.lowercased().contains("leo")
             let match = hint.map { name.lowercased().contains($0) } ?? false
-            if (match || lock), state == "scannen" {
+            if (match || isLock), state == "scannen" {
                 state = "verbinden"
                 self.peripheral = peripheral
                 peripheral.delegate = self
@@ -116,29 +118,28 @@ extension BLEController: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         Task { @MainActor in
             for c in service.characteristics ?? [] {
-                if c.uuid == LinkaBLE.dataRX {           // D31E0002 — write commands here
-                    writeChar = c
-                    writeType = c.properties.contains(.write) ? .withResponse : .withoutResponse
-                }
-                if c.uuid == LinkaBLE.dataTX || c.properties.contains(.notify) || c.properties.contains(.indicate) {
-                    peripheral.setNotifyValue(true, for: c)   // status frames
+                if c.uuid == LinkaBLE.dataRX { write0002 = c }
+                if c.uuid.uuidString.uppercased().hasPrefix("D31E0016") { write0016 = c }
+                if c.properties.contains(.notify) || c.properties.contains(.indicate) {
+                    peripheral.setNotifyValue(true, for: c)
                 }
             }
-            ready = (writeChar != nil)
+            ready = (write0002 != nil || write0016 != nil)
             state = ready ? "klaar" : "verbonden (geen write-char)"
-            add(ready ? "Klaar. Wacht op statusframe voor teller…" : "Geen write-characteristic gevonden.")
+            add(ready ? "Klaar. Wacht op context-frame (0x12)…" : "Geen write-characteristic.")
         }
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         let data = [UInt8](characteristic.value ?? Data())
-        let uuid = characteristic.uuid
+        let uuid = characteristic.uuid.uuidString
         Task { @MainActor in
-            if uuid == LinkaBLE.dataTX, let parsed = LinkaCrypto.parseStatus(data) {
-                encVer = parsed.encVer
-                counter = parsed.counter
-                add("status: encVer \(parsed.encVer), teller \(parsed.counter)  [\(LinkaCrypto.toHex(data))]")
+            // The command context is the 0x12-prefixed frame (encVer 2).
+            if data.count >= 7, data[0] == 0x12 {
+                ctxEncVer = Int(data[2])
+                ctxCounter = UInt32(data[3]) | (UInt32(data[4]) << 8) | (UInt32(data[5]) << 16) | (UInt32(data[6]) << 24)
+                add("CONTEXT: encVer \(ctxEncVer!), teller \(ctxCounter!)  [\(LinkaCrypto.toHex(data))]")
             } else {
-                add("← \(uuid.uuidString.prefix(8)): \(LinkaCrypto.toHex(data))")
+                add("← \(uuid.prefix(8)): \(LinkaCrypto.toHex(data))")
             }
         }
     }
