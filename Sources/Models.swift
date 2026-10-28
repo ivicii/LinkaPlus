@@ -57,6 +57,54 @@ struct Lock: Decodable, Identifiable, Hashable {
     }
 }
 
+// MARK: - Associated locks (the actual list endpoint)
+
+/// Shape returned by PUT /api/keys/associated_locks (confirmed on device).
+/// `location` is GeoJSON-style [longitude, latitude].
+struct AssociatedLock: Decodable {
+    let _id: String
+    let name: String?
+    let lock_type: String?
+    let lock_serial_no: String?
+    let isOwner: Bool?
+    let location: [Double]?
+    let location_update_time: String?
+
+    func asLock() -> Lock {
+        let lat = (location?.count == 2) ? location?[1] : nil
+        let lon = (location?.count == 2) ? location?[0] : nil
+        return Lock(
+            _id: _id,
+            name: name,
+            serial_no: lock_serial_no,
+            is_locked: nil,
+            latitude: lat,
+            longitude: lon,
+            createdAt: nil,
+            modifiedAt: location_update_time,
+            userProfile_id: nil
+        )
+    }
+}
+
+extension Lock {
+    /// Overlay a single-lock lookup: take its locked state, and use its
+    /// coordinates only where we don't already have a GPS location.
+    func merging(_ other: Lock) -> Lock {
+        Lock(
+            _id: _id,
+            name: name ?? other.name,
+            serial_no: serial_no ?? other.serial_no,
+            is_locked: other.is_locked ?? is_locked,
+            latitude: hasLocation ? latitude : other.latitude,
+            longitude: hasLocation ? longitude : other.longitude,
+            createdAt: other.createdAt,
+            modifiedAt: modifiedAt ?? other.modifiedAt,
+            userProfile_id: other.userProfile_id ?? userProfile_id
+        )
+    }
+}
+
 // MARK: - Activities
 
 struct LockActivity: Decodable, Identifiable {

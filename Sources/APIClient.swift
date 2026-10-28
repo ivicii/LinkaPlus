@@ -84,37 +84,37 @@ struct APIClient {
 
     // MARK: Authenticated endpoints
 
+    /// The user's lock list. Confirmed via on-device diagnostics: the list
+    /// comes from `associated_locks` (user-scoped), which also carries the
+    /// GPS `location` [lng, lat]. We then enrich each lock's locked state from
+    /// the single-lock endpoint.
     func getLocks(auth: Identity) async throws -> [Lock] {
-        // The /api/locks collection requires a Mongo-style `query` param
-        // (same pattern the app uses for a single lock: {"serial_no": "..."}).
-        // Try a user-scoped filter first, then an empty filter as fallback.
-        let userId = auth.userId ?? ""
-        let queries = [
-            "{}",
-            "{\"userProfile_id\":\"\(userId)\"}",
-        ]
-        var lastError: Error?
-        for q in queries {
-            do {
-                let locks = try await locksQuery(q, auth: auth)
-                if !locks.isEmpty { return locks }
-            } catch {
-                lastError = error
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/associated_locks"))
+        req.httpMethod = "PUT"
+        setForm(["device_token": auth.deviceToken], on: &req)
+        authorize(&req, auth: auth)
+
+        let assoc = try await decodeArray(req, as: AssociatedLock.self)
+        var locks = assoc.map { $0.asLock() }
+
+        // Best-effort: enrich locked-state (and fall back coords) per serial.
+        for i in locks.indices {
+            guard let serial = locks[i].serial_no else { continue }
+            if let single = try? await lockSingle(serial: serial, auth: auth) {
+                locks[i] = locks[i].merging(single)
             }
         }
-        if let lastError { throw lastError }
-        return []
+        return locks
     }
 
-    private func locksQuery(_ json: String, auth: Identity) async throws -> [Lock] {
-        // NOTE: no trailing slash — "/api/locks/" routes to the single-lock
-        // handler that requires serial_no; "/api/locks" is the list handler.
+    /// Single-lock lookup by serial (the `/api/locks?query={"serial_no":...}` route).
+    private func lockSingle(serial: String, auth: Identity) async throws -> Lock? {
         var comps = URLComponents(string: Self.baseURL.absoluteString + "/api/locks")!
-        comps.queryItems = [URLQueryItem(name: "query", value: json)]
+        comps.queryItems = [URLQueryItem(name: "query", value: "{\"serial_no\":\"\(serial)\"}")]
         var req = URLRequest(url: comps.url!)
         req.httpMethod = "GET"
         authorize(&req, auth: auth)
-        return try await decodeArray(req, as: Lock.self)
+        return try await decodeArray(req, as: Lock.self).first
     }
 
     func fetchActivities(serial: String, auth: Identity) async throws -> [LockActivity] {
