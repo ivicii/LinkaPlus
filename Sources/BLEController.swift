@@ -11,12 +11,14 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var ready = false
     @Published private(set) var ctxEncVer: Int?
     @Published private(set) var ctxCounter: UInt32?
+    @Published private(set) var testing = false
     @Published private(set) var log: [String] = []
 
     private var subkey: [UInt8] = []
     private var mac: [UInt8] = []
     private var priv: LinkaCrypto.Priv = .admin
     private var nameHint: String?
+    private var allKeys: AccessKeys?
 
     /// 0 = D31E0002 (legacy), 1 = D31E0016 (newer V2 channel).
     var channel = 0
@@ -27,12 +29,75 @@ final class BLEController: NSObject, ObservableObject {
     private var write0002: CBCharacteristic?
     private var write0016: CBCharacteristic?
 
-    func configure(keyHex: String, admin: Bool, serial: String, nameHint: String?) {
-        subkey = LinkaCrypto.hex(keyHex)
+    func configure(keys: AccessKeys, serial: String, nameHint: String?) {
+        allKeys = keys
         mac = LinkaCrypto.macBytes(serial) ?? []
-        priv = admin ? .admin : .user
         self.nameHint = nameHint
+        if let ck = keys.commandKey {
+            subkey = LinkaCrypto.hex(ck.hex)
+            priv = ck.admin ? .admin : .user
+        }
     }
+
+    struct KeyVariant { let name: String; let hex: String; let priv: LinkaCrypto.Priv }
+
+    private func keyVariants() -> [KeyVariant] {
+        guard let k = allKeys else { return [] }
+        var out: [KeyVariant] = []
+        func put(_ n: String, _ s: String?, _ p: LinkaCrypto.Priv) {
+            if let s = s, !s.isEmpty { out.append(KeyVariant(name: n, hex: s, priv: p)) }
+        }
+        put("v2_admin2", k.v2_access_key_admin_2, .admin)
+        put("v2_user2",  k.v2_access_key_user_2,  .user)
+        put("admin2",    k.access_key_admin_2,    .admin)
+        put("user2",     k.access_key_user_2,     .user)
+        put("master2",   k.access_key_master_2,   .admin)
+        put("master",    k.access_key_master,     .admin)
+        return out
+    }
+
+    /// Sweeps key variants × channels × counter offsets, sending an UNLOCK for
+    /// each so we can see which combination the lock reacts to.
+    func autoTest() {
+        guard !testing else { return }
+        let variants = keyVariants()
+        guard !variants.isEmpty, mac.count == 6 else { add("Auto-test: geen sleutels/mac."); return }
+        testing = true
+        add("== Auto-test gestart ==")
+        Task {
+            let channels = [0, 1]
+            let offsets = [0, 1]
+            let total = variants.count * channels.count * offsets.count
+            var idx = 0
+            outer: for v in variants {
+                for ch in channels {
+                    for off in offsets {
+                        if !testing { break outer }
+                        idx += 1
+                        guard let c = ctxCounter else {
+                            add("[\(idx)/\(total)] geen teller — wacht op context…")
+                            try? await Task.sleep(nanoseconds: 1_500_000_000); continue
+                        }
+                        let chr = (ch == 1) ? write0016 : write0002
+                        guard let chr = chr else {
+                            add("[\(idx)/\(total)] kanaal \(ch == 1 ? "0016" : "0002") niet beschikbaar"); continue
+                        }
+                        let useCounter = UInt32(truncatingIfNeeded: Int(c) + off)
+                        let frame = LinkaCrypto.commandFrame(mac: mac, payload: [0, 0],
+                                                             subkey: LinkaCrypto.hex(v.hex), priv: v.priv, counter: useCounter)
+                        add("[TEST \(idx)/\(total)] UNLOCK key=\(v.name) ch=\(ch == 1 ? "0016" : "0002") off=\(off) ctr=\(useCounter)")
+                        let type: CBCharacteristicWriteType = chr.properties.contains(.write) ? .withResponse : .withoutResponse
+                        peripheral?.writeValue(Data(frame), for: chr, type: type)
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    }
+                }
+            }
+            add("== Auto-test klaar (\(idx) pogingen) ==")
+            testing = false
+        }
+    }
+
+    func stopTest() { testing = false }
 
     override init() {
         super.init()

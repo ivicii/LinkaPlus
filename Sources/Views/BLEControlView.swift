@@ -38,11 +38,28 @@ struct BLEControlView: View {
                     Button {
                         ble.channel = channel; ble.counterOffset = counterOffset; ble.unlock()
                     } label: { Label("Open (unlock)", systemImage: "lock.open") }
-                        .disabled(!ble.ready)
+                        .disabled(!ble.ready || ble.testing)
                     Button {
                         ble.channel = channel; ble.counterOffset = counterOffset; ble.lock()
                     } label: { Label("Sluit (lock)", systemImage: "lock") }
+                        .disabled(!ble.ready || ble.testing)
+                }
+
+                Section {
+                    if ble.testing {
+                        Button(role: .destructive) { ble.stopTest() } label: {
+                            HStack { ProgressView(); Label("Stop auto-test", systemImage: "stop.circle") }
+                        }
+                    } else {
+                        Button { ble.autoTest() } label: {
+                            Label("Auto-test: probeer alle combinaties", systemImage: "wand.and.stars")
+                        }
                         .disabled(!ble.ready)
+                    }
+                } header: {
+                    Text("Automatisch testen")
+                } footer: {
+                    Text("Stuurt achter elkaar een unlock met elke sleutel × kanaal × teller-offset (±2 sec elk). Kijk wanneer je slot reageert en deel daarna de log.")
                 }
 
                 Section {
@@ -84,8 +101,8 @@ struct BLEControlView: View {
         loadError = nil
         do {
             let status = try await api.checkKeyStatus(serial: serial, auth: session.identity())
-            guard let ck = status.key?.commandKey else { loadError = "Geen bruikbare access-key gevonden."; return }
-            ble.configure(keyHex: ck.hex, admin: ck.admin, serial: serial, nameHint: lockName)
+            guard let keys = status.key, keys.commandKey != nil else { loadError = "Geen bruikbare access-key gevonden."; return }
+            ble.configure(keys: keys, serial: serial, nameHint: lockName)
             keyLoaded = true
             ble.start()
         } catch {
