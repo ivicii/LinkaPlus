@@ -117,6 +117,30 @@ struct APIClient {
         return try await decodeArray(req, as: Lock.self).first
     }
 
+    /// Start/stop recovery (theft-tracking) mode. When on, the lock reports
+    /// live GPS and `currentTracking` returns the route.
+    func setRecoveryMode(serial: String, enabled: Bool, auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/leo/recovery_mode"))
+        req.httpMethod = "POST"
+        setForm(["lock_serial_no": serial, "recovery_mode": enabled ? "true" : "false"], on: &req)
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
+    /// Live tracking points for the current recovery session. Throws when the
+    /// lock is not in tracking mode (server replies "Not currently theft").
+    func currentTracking(serial: String, auth: Identity) async throws -> [LockActivity] {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/leo/current_tracking"))
+        req.httpMethod = "POST"
+        setForm(["lock_serial_no": serial, "date": "1970-01-01T00:00:00.000+0000"], on: &req)
+        authorize(&req, auth: auth)
+        let (data, http) = try await rawSend(req)
+        try throwIfHTTPError(http, data)
+        let env = try JSONDecoder().decode(APIEnvelope<CurrentTracking>.self, from: data)
+        guard env.isSuccess else { throw APIError.server(env.message ?? "Geen tracking.") }
+        return env.data?.activities ?? []
+    }
+
     /// Play the lock's siren so you can locate it (LEO cellular feature).
     func activateSiren(serial: String, auth: Identity) async throws {
         var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/leo/activate_siren"))

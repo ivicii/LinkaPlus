@@ -105,6 +105,14 @@ extension Lock {
     }
 }
 
+// MARK: - Live tracking (recovery mode)
+
+struct CurrentTracking: Decodable {
+    let activities: [LockActivity]?
+    let theft_status: Int?
+    let theft_tracking_id: String?
+}
+
 // MARK: - Activities
 
 struct LockActivity: Decodable, Identifiable {

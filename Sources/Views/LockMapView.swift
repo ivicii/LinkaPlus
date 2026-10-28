@@ -6,6 +6,7 @@ import MapKit
 struct LockMapView: UIViewRepresentable {
     let coordinate: CLLocationCoordinate2D
     let title: String
+    var route: [CLLocationCoordinate2D] = []
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -26,17 +27,35 @@ struct LockMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
-        guard let pin = map.annotations.first(where: { $0 is MKPointAnnotation }) as? MKPointAnnotation
-        else { return }
-        if pin.coordinate.latitude != coordinate.latitude || pin.coordinate.longitude != coordinate.longitude {
+        if let pin = map.annotations.first(where: { $0 is MKPointAnnotation }) as? MKPointAnnotation,
+           pin.coordinate.latitude != coordinate.latitude || pin.coordinate.longitude != coordinate.longitude {
             pin.coordinate = coordinate
             map.setCenter(coordinate, animated: true)
+        }
+
+        // Redraw route overlay if it changed.
+        let existing = map.overlays.compactMap { $0 as? MKPolyline }
+        if existing.count != (route.count > 1 ? 1 : 0) {
+            map.removeOverlays(map.overlays)
+            if route.count > 1 {
+                map.addOverlay(MKPolyline(coordinates: route, count: route.count))
+            }
         }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
+        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if let line = overlay as? MKPolyline {
+                let r = MKPolylineRenderer(polyline: line)
+                r.strokeColor = .systemBlue
+                r.lineWidth = 4
+                return r
+            }
+            return MKOverlayRenderer(overlay: overlay)
+        }
+
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
             if annotation is MKUserLocation { return nil } // keep default blue dot
             let id = "lock"

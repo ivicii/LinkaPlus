@@ -13,6 +13,12 @@ struct LockDetailView: View {
     @State private var sirenBusy = false
     @State private var sirenMessage: String?
 
+    @State private var recoveryOn = false
+    @State private var recoveryBusy = false
+    @State private var recoveryMessage: String?
+    @State private var confirmEnable = false
+    @State private var routePoints: [CLLocationCoordinate2D] = []
+
     @StateObject private var loc = LocationProvider()
 
     private var distanceText: String? {
@@ -104,6 +110,38 @@ struct LockDetailView: View {
                 }
             }
 
+            Section {
+                if recoveryOn {
+                    Button(role: .destructive) { setRecovery(false) } label: {
+                        HStack {
+                            if recoveryBusy { ProgressView() }
+                            Label("Stop tracking (recovery)", systemImage: "stop.circle.fill")
+                        }
+                    }
+                    .disabled(recoveryBusy)
+                    Button {
+                        Task { await refreshRoute() }
+                    } label: {
+                        Label("Route verversen (\(routePoints.count) punten)", systemImage: "arrow.clockwise")
+                    }
+                } else {
+                    Button { confirmEnable = true } label: {
+                        HStack {
+                            if recoveryBusy { ProgressView() }
+                            Label("Zet in tracking-/recovery-modus", systemImage: "dot.radiowaves.left.and.right")
+                        }
+                    }
+                    .disabled(recoveryBusy || lock.serial_no == nil)
+                }
+                if let recoveryMessage {
+                    Text(recoveryMessage).font(.caption).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Live tracking")
+            } footer: {
+                Text("Recovery-modus is de anti-diefstalstand: het slot stuurt dan continu zijn GPS-positie door (verbruikt meer batterij en dataplan). De afgelegde route verschijnt op de kaart.")
+            }
+
             Section("Activiteiten") {
                 if busy && activities.isEmpty {
                     HStack { ProgressView(); Text("Laden…").foregroundStyle(.secondary) }
@@ -119,14 +157,24 @@ struct LockDetailView: View {
         .task {
             loc.start()
             await load()
+            await syncRecoveryState()
         }
-        .refreshable { await load() }
+        .refreshable {
+            await load()
+            await syncRecoveryState()
+        }
+        .alert("Tracking-/recovery-modus aanzetten?", isPresented: $confirmEnable) {
+            Button("Annuleer", role: .cancel) {}
+            Button("Aanzetten", role: .destructive) { setRecovery(true) }
+        } message: {
+            Text("Dit is de anti-diefstalstand. Je slot gaat continu zijn GPS-positie doorsturen (meer batterij- en dataverbruik). Je kunt het weer uitzetten.")
+        }
     }
 
     @ViewBuilder
     private var mapView: some View {
         if let coordinate {
-            LockMapView(coordinate: coordinate, title: lock.displayName)
+            LockMapView(coordinate: coordinate, title: lock.displayName, route: routePoints)
         } else {
             ZStack {
                 Color(.secondarySystemBackground)
@@ -177,6 +225,55 @@ struct LockDetailView: View {
             }
             sirenBusy = false
         }
+    }
+
+    private func setRecovery(_ enable: Bool) {
+        guard let serial = lock.serial_no else { return }
+        recoveryBusy = true; recoveryMessage = nil
+        Task {
+            do {
+                try await api.setRecoveryMode(serial: serial, enabled: enable, auth: session.identity())
+                recoveryOn = enable
+                if enable {
+                    recoveryMessage = "Tracking gestart. Het kan even duren voor de eerste GPS-punten binnen zijn — tik op 'Route verversen'."
+                    await refreshRoute()
+                } else {
+                    recoveryMessage = "Tracking gestopt."
+                    routePoints = []
+                }
+            } catch {
+                recoveryMessage = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error)"
+            }
+            recoveryBusy = false
+        }
+    }
+
+    /// Reads whether tracking is currently active (current_tracking succeeds
+    /// only in tracking mode) and loads the route if so.
+    private func syncRecoveryState() async {
+        guard lock.serial_no != nil else { return }
+        if let pts = try? await trackingCoords() {
+            routePoints = pts
+            recoveryOn = true
+        } else {
+            recoveryOn = false
+        }
+    }
+
+    private func refreshRoute() async {
+        if let pts = try? await trackingCoords() { routePoints = pts }
+    }
+
+    private func trackingCoords() async throws -> [CLLocationCoordinate2D] {
+        guard let serial = lock.serial_no else { return [] }
+        let pts = try await api.currentTracking(serial: serial, auth: session.identity())
+        return pts
+            .filter { $0.hasLocation }
+            .sorted { (DateUtils.parseAny($0.timestamp) ?? .distantPast) < (DateUtils.parseAny($1.timestamp) ?? .distantPast) }
+            .compactMap { a in
+                guard let la = a.latitude, let lo = a.longitude else { return nil }
+                return CLLocationCoordinate2D(latitude: la, longitude: lo)
+            }
     }
 
     private func load() async {
