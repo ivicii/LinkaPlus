@@ -90,8 +90,8 @@ struct APIClient {
         // Try a user-scoped filter first, then an empty filter as fallback.
         let userId = auth.userId ?? ""
         let queries = [
-            "{\"userProfile_id\":\"\(userId)\"}",
             "{}",
+            "{\"userProfile_id\":\"\(userId)\"}",
         ]
         var lastError: Error?
         for q in queries {
@@ -107,7 +107,9 @@ struct APIClient {
     }
 
     private func locksQuery(_ json: String, auth: Identity) async throws -> [Lock] {
-        var comps = URLComponents(string: Self.baseURL.absoluteString + "/api/locks/")!
+        // NOTE: no trailing slash — "/api/locks/" routes to the single-lock
+        // handler that requires serial_no; "/api/locks" is the list handler.
+        var comps = URLComponents(string: Self.baseURL.absoluteString + "/api/locks")!
         comps.queryItems = [URLQueryItem(name: "query", value: json)]
         var req = URLRequest(url: comps.url!)
         req.httpMethod = "GET"
