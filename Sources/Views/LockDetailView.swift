@@ -104,6 +104,7 @@ struct LockDetailView: View {
         }
         .navigationDestination(isPresented: $showSettings) { settingsPage }
         .task {
+            movementAlarmOn = LockPrefs.movementAlarm(serial: lock.serial_no)
             loc.start()
             await startBLE()
             await load()
@@ -272,10 +273,17 @@ struct LockDetailView: View {
     @ViewBuilder
     private var slotinstellingenSection: some View {
         Section {
-            Toggle(isOn: $movementAlarmOn) {
+            Toggle(isOn: Binding(
+                get: { movementAlarmOn },
+                set: { on in
+                    movementAlarmOn = on
+                    LockPrefs.setMovementAlarm(on, serial: lock.serial_no)
+                    if ble.ready { ble.setMovementAlarm(on) }
+                }
+            )) {
                 Label("Beweeg-alarm", systemImage: "bell.badge")
             }
-            .onChange(of: movementAlarmOn) { on in ble.setMovementAlarm(on) }
+            .disabled(!ble.ready)
 
             HStack {
                 Label("PAC-code", systemImage: "number.square")

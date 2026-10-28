@@ -25,3 +25,16 @@ enum LockCache {
         return (try? JSONDecoder().decode([Lock].self, from: data)) ?? []
     }
 }
+
+/// Small per-lock UI preferences that should survive app restarts.
+enum LockPrefs {
+    static func setMovementAlarm(_ on: Bool, serial: String?) {
+        guard let serial else { return }
+        UserDefaults.standard.set(on, forKey: "movementAlarm_\(serial)")
+    }
+
+    static func movementAlarm(serial: String?) -> Bool {
+        guard let serial else { return false }
+        return UserDefaults.standard.bool(forKey: "movementAlarm_\(serial)")
+    }
+}
