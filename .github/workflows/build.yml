@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: macos-14
+    permissions:
+      contents: write
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
@@ -43,7 +45,7 @@ jobs:
 
       - name: Build (no code signing)
         run: |
-          set -eo pipefail
+          set -o pipefail
           xcodebuild \
             -project LinkaPlus.xcodeproj \
             -scheme LinkaPlus \
@@ -55,7 +57,30 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             ONLY_ACTIVE_ARCH=NO \
-            clean build
+            clean build 2>&1 | tee /tmp/build.log
+
+      - name: Report build errors on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Collecting errors…"
+          {
+            echo "### Build failed — extracted errors"
+            echo ""
+            echo '```'
+            grep -nE "error:|: error|The following build commands failed|Undefined symto|cannot find|no such module|is unavailable|Command .* failed" /tmp/build.log 2>/dev/null | tail -120 || echo "(no matching error lines; see tail below)"
+            echo '```'
+            echo ""
+            echo "<details><summary>Last 120 log lines</summary>"
+            echo ""
+            echo '```'
+            tail -120 /tmp/build.log 2>/dev/null || true
+            echo '```'
+            echo "</details>"
+          } > /tmp/report.md
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" \
+            -f body="$(cat /tmp/report.md)" >/dev/null && echo "Posted error report as commit comment."
 
       - name: Package into .ipa
         run: |
