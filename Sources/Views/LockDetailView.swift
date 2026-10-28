@@ -142,9 +142,20 @@ struct LockDetailView: View {
                 if let simError {
                     Text(simError).font(.caption).foregroundStyle(.secondary)
                 }
+                if let sim {
+                    if sim.data_plan_enabled == true {
+                        Button(role: .destructive) { setDataPlan(false) } label: {
+                            Label("Auto-verlengen uitzetten", systemImage: "xmark.circle")
+                        }
+                    } else {
+                        Button { setDataPlan(true) } label: {
+                            Label("Auto-verlengen aanzetten (opgeslagen kaart)", systemImage: "checkmark.circle")
+                        }
+                    }
+                }
                 if lock.serial_no != nil {
                     Button { showRenew = true } label: {
-                        Label("Dataplan verlengen", systemImage: "creditcard")
+                        Label("Dataplan verlengen / kaart wijzigen", systemImage: "creditcard")
                     }
                 }
             } header: {
@@ -295,6 +306,21 @@ struct LockDetailView: View {
         let m = Double(bytes) / 1_000_000
         if m >= 1 { return String(format: "%.1f MB", m) }
         return String(format: "%.0f KB", Double(bytes) / 1000)
+    }
+
+    /// Turn the data-plan auto-renew on/off (enable_data_plan). "Off" is the
+    /// equivalent of the official app's "Cancel Renewal".
+    private func setDataPlan(_ enabled: Bool) {
+        guard let serial = lock.serial_no else { return }
+        simLoading = true; simError = nil
+        Task {
+            do {
+                try await api.enableDataPlan(serial: serial, enabled: enabled, auth: session.identity())
+            } catch {
+                simError = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error)"
+            }
+            loadSim()   // refresh status (manages simLoading)
+        }
     }
 
     private func loadSim() {
