@@ -19,6 +19,8 @@ struct LockDetailView: View {
     @State private var confirmEnable = false
     @State private var routePoints: [CLLocationCoordinate2D] = []
 
+    @State private var showBLE = false
+
     @StateObject private var loc = LocationProvider()
 
     private var distanceText: String? {
@@ -142,6 +144,16 @@ struct LockDetailView: View {
                 Text("Recovery-modus is de anti-diefstalstand: het slot stuurt dan continu zijn GPS-positie door (verbruikt meer batterij en dataplan). De afgelegde route verschijnt op de kaart.")
             }
 
+            Section {
+                Button {
+                    showBLE = true
+                } label: {
+                    Label("Bluetooth-diagnose (Fase 2)", systemImage: "dot.radiowaves.right")
+                }
+            } footer: {
+                Text("Verbindt met je slot via Bluetooth en toont het GATT-profiel + statuspacket — voorbereiding voor openen/sluiten.")
+            }
+
             Section("Activiteiten") {
                 if busy && activities.isEmpty {
                     HStack { ProgressView(); Text("Laden…").foregroundStyle(.secondary) }
@@ -168,6 +180,9 @@ struct LockDetailView: View {
             Button("Aanzetten", role: .destructive) { setRecovery(true) }
         } message: {
             Text("Dit is de anti-diefstalstand. Je slot gaat continu zijn GPS-positie doorsturen (meer batterij- en dataverbruik). Je kunt het weer uitzetten.")
+        }
+        .sheet(isPresented: $showBLE) {
+            BLEDiagnosticsView(lockName: lock.displayName)
         }
     }
 

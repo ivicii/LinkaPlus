@@ -120,6 +120,10 @@ struct DiagnosticsView: View {
             out.append(await api.probe(label: "PUT /api/keys/lock_permissions",
                                        method: "PUT", path: "/api/keys/lock_permissions",
                                        form: ["lock_serial_no": serial], auth: auth))
+            out.append(await api.probe(label: "PUT /api/keys/check_key_status_for_user_v2 (access-key)",
+                                       method: "PUT", path: "/api/keys/check_key_status_for_user_v2",
+                                       form: ["lock_serial_no": serial, "device_token": auth.deviceToken],
+                                       auth: auth))
             out.append(await api.probe(label: "POST /api/payments_consumer/stripe/get_payment_info",
                                        method: "POST", path: "/api/payments_consumer/stripe/get_payment_info",
                                        auth: auth))
