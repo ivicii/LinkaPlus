@@ -143,6 +143,21 @@ struct AccessKeys: Codable {
     }
 }
 
+// MARK: - Firmware (consumer_app_version)
+
+/// Mirrors LINKA's /api/consumer_app_version data: the firmware the official
+/// app would download and flash over Nordic Secure DFU.
+struct ConsumerAppVersion: Codable {
+    let leo2_firmware_url: String?
+    let leo2_firmware_version: String?
+    let leo2_firmware_date: String?
+    let leo2_firmware_desc: String?
+    let lasso_firmware_url: String?
+    let lasso_firmware_version: String?
+    let lasso_firmware_date: String?
+    let lasso_firmware_desc: String?
+}
+
 // MARK: - Payments (Stripe) for data-plan renewal
 
 struct PaymentInfo: Decodable {

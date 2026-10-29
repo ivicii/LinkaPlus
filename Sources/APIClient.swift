@@ -263,6 +263,30 @@ struct APIClient {
         return try await decodeArray(req, as: LockActivity.self)
     }
 
+    // MARK: - Firmware
+
+    /// The firmware image the official app would download for the LEO2 / Lasso.
+    func consumerAppVersion(auth: Identity) async throws -> ConsumerAppVersion {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/consumer_app_version"))
+        req.httpMethod = "GET"
+        authorize(&req, auth: auth)
+        return try await decodeObject(req, as: ConsumerAppVersion.self)
+    }
+
+    /// Download a file (e.g. the firmware .zip) to a temporary local file.
+    func downloadFile(from urlString: String, suggestedName: String) async throws -> URL {
+        guard let url = URL(string: urlString) else { throw APIError.server("Ongeldige firmware-URL.") }
+        let (tmp, response) = try await session.download(from: url)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw APIError.http(http.statusCode, "Download mislukt.")
+        }
+        let name = suggestedName.isEmpty ? "firmware.zip" : suggestedName
+        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.moveItem(at: tmp, to: dest)
+        return dest
+    }
+
     // MARK: - Diagnostics
 
     struct ProbeResult: Identifiable {

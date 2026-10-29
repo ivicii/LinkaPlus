@@ -35,6 +35,7 @@ struct LockDetailView: View {
     @State private var renameText = ""
     @State private var showSettings = false
     @State private var showFullMap = false
+    @State private var showFirmware = false
 
     private var liveLocked: Bool { ble.liveLocked ?? lock.is_locked ?? true }
 
@@ -127,6 +128,9 @@ struct LockDetailView: View {
             Text("Dit is de anti-diefstalstand. Je slot gaat continu zijn GPS-positie doorsturen (meer batterij- en dataverbruik). Je kunt het weer uitzetten.")
         }
         .sheet(isPresented: $showFullMap) { fullMapSheet }
+        .sheet(isPresented: $showFirmware) {
+            FirmwareView().environmentObject(session)
+        }
         .sheet(isPresented: $showBLE) {
             BLEDiagnosticsView(lockName: lock.displayName)
         }
@@ -363,6 +367,11 @@ struct LockDetailView: View {
                 showBLE = true
             } label: {
                 Label("Bluetooth-diagnose", systemImage: "dot.radiowaves.right")
+            }
+            Button {
+                showFirmware = true
+            } label: {
+                Label("Firmware ophalen (analyse)", systemImage: "cpu")
             }
         } header: {
             Text("Geavanceerd")
