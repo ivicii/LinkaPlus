@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LockListView: View {
     @EnvironmentObject var session: SessionStore
+    @EnvironmentObject var router: AppRouter
     private let api = APIClient()
 
     @State private var locks: [Lock] = []
@@ -9,9 +10,10 @@ struct LockListView: View {
     @State private var error: String?
     @State private var showDiagnostics = false
     @State private var offline = false
+    @State private var path: [Lock] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if busy && locks.isEmpty {
                     ProgressView("Sloten laden…")
@@ -60,6 +62,12 @@ struct LockListView: View {
                 }
             }
             .task { await load() }
+            .onChange(of: router.unlockRequested) { req in
+                if req, let first = locks.first, path.last != first { path = [first] }
+            }
+            .onChange(of: locks) { newLocks in
+                if router.unlockRequested, let first = newLocks.first, path.isEmpty { path = [first] }
+            }
             .sheet(isPresented: $showDiagnostics) {
                 DiagnosticsView().environmentObject(session)
             }

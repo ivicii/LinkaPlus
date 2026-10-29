@@ -4,6 +4,7 @@ import MapKit
 struct LockDetailView: View {
     let lock: Lock
     @EnvironmentObject var session: SessionStore
+    @EnvironmentObject var router: AppRouter
     private let api = APIClient()
 
     @State private var activities: [LockActivity] = []
@@ -112,6 +113,8 @@ struct LockDetailView: View {
             loadSim()
         }
         .onDisappear { ble.stop() }
+        .onChange(of: ble.ctxCounter) { _ in maybeAutoUnlock() }
+        .onChange(of: router.unlockRequested) { _ in maybeAutoUnlock() }
         .refreshable {
             await load()
             await syncRecoveryState()
@@ -671,6 +674,16 @@ struct LockDetailView: View {
                 Text(ble.lastEvent).font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Triggered by the Action button / widget / Shortcut deep link: unlock as
+    /// soon as we have a live context counter from the lock.
+    private func maybeAutoUnlock() {
+        guard router.unlockRequested, ble.ctxCounter != nil else { return }
+        router.unlockRequested = false
+        ble.channel = 0; ble.counterOffset = 0
+        ble.unlock()
+        Haptic.success()
     }
 
     private func startBLE() async {

@@ -20,12 +20,15 @@ targets:
     type: application
     platform: iOS
     sources:
-      - Sources
+      - path: Sources
+        excludes:
+          - "Widget/**"
     dependencies:
       - package: Stripe
         product: StripePaymentSheet
       - package: Stripe
         product: StripePayments
+      - target: LinkaPlusWidget
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ivoroo.linkaplus
@@ -43,6 +46,10 @@ targets:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        CFBundleURLTypes:
+          - CFBundleURLName: com.ivoroo.linkaplus
+            CFBundleURLSchemes:
+              - linkaplus
         UIBackgroundModes:
           - bluetooth-central
         NSBluetoothAlwaysUsageDescription: "LinkaPlus gebruikt Bluetooth om verbinding te maken met je LINKA-slot."
@@ -54,10 +61,27 @@ targets:
               NSExceptionAllowsInsecureHTTPLoads: false
               NSExceptionMinimumTLSVersion: "TLSv1.0"
               NSExceptionRequiresForwardSecrecy: false
+  LinkaPlusWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Sources/Widget
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ivoroo.linkaplus.widget
+        PRODUCT_NAME: LinkaPlusWidget
+        TARGETED_DEVICE_FAMILY: "1,2"
+    info:
+      path: Sources/Widget/Info.plist
+      properties:
+        CFBundleDisplayName: LinkaPlus
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
 schemes:
   LinkaPlus:
     build:
       targets:
         LinkaPlus: all
+        LinkaPlusWidget: all
     run:
       config: Release
