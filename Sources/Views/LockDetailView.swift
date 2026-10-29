@@ -421,10 +421,17 @@ struct LockDetailView: View {
                     Label("Geluid uit", systemImage: "speaker.slash.fill")
                 }
             } else {
+                Label("Wacht op Bluetooth-verbinding…", systemImage: "antenna.radiowaves.left.and.right.slash")
+                    .foregroundStyle(.secondary)
+                if ble.state == "verbroken" || ble.state == "gestopt" {
+                    Button { ble.start() } label: {
+                        Label("Opnieuw verbinden", systemImage: "arrow.clockwise")
+                    }
+                }
                 Button(action: playSiren) {
                     HStack {
                         if sirenBusy { ProgressView() }
-                        Label("Geluid via cloud (vereist dataplan)", systemImage: "speaker.wave.3.fill")
+                        Label("Toch via cloud proberen", systemImage: "cloud")
                     }
                 }
                 .disabled(sirenBusy || lock.serial_no == nil)
@@ -433,7 +440,9 @@ struct LockDetailView: View {
         } header: {
             Text("Geluid")
         } footer: {
-            Text(ble.ready ? "Via Bluetooth — werkt lokaal, ook zonder dataplan." : "Speelt het geluid/sirene op je slot af.")
+            Text(ble.ready
+                 ? "Via Bluetooth — werkt lokaal, ook zonder dataplan."
+                 : "Geluid afspelen werkt betrouwbaar via Bluetooth (dichtbij het slot). De cloud-variant lukt alleen als het slot net online is, anders geeft de server \"not currently active\".")
         }
     }
 
@@ -801,7 +810,13 @@ struct LockDetailView: View {
                 try await api.activateSiren(serial: serial, auth: session.identity())
                 sirenMessage = "Sirene geactiveerd — luister naar je slot."
             } catch {
-                sirenMessage = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error)"
+                let raw = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                if raw.localizedCaseInsensitiveContains("not currently")
+                    || raw.localizedCaseInsensitiveContains("not active") {
+                    sirenMessage = "Het slot is nu niet live online, dus de cloud-sirene lukt niet (\"\(raw)\"). Ga dichtbij het slot en gebruik de Bluetooth-knop zodra 'Verbonden' verschijnt."
+                } else {
+                    sirenMessage = "Mislukt: \(raw)"
+                }
             }
             sirenBusy = false
         }
