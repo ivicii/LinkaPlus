@@ -1,30 +1,57 @@
 import SwiftUI
 import Charts
 
-/// A clean statistics page derived from the lock's activity history.
+/// An interactive statistics page derived from the lock's activity history.
+/// The activity chart can be grouped by hour / day / week / month, and each
+/// bar is tappable to reveal its exact count.
 struct StatsView: View {
     let activities: [LockActivity]
     let lockName: String
     @Environment(\.dismiss) var dismiss
 
-    private struct DayCount: Identifiable { let date: Date; let count: Int; var id: Date { date } }
+    enum Gran: String, CaseIterable, Identifiable {
+        case uur = "Uur", dag = "Dag", week = "Week", maand = "Maand"
+        var id: String { rawValue }
+        var component: Calendar.Component {
+            switch self {
+            case .uur: return .hour
+            case .dag: return .day
+            case .week: return .weekOfYear
+            case .maand: return .month
+            }
+        }
+        var count: Int {
+            switch self {
+            case .uur: return 24
+            case .dag: return 14
+            case .week: return 12
+            case .maand: return 12
+            }
+        }
+        var chartUnit: Calendar.Component {
+            self == .week ? .weekOfYear : component
+        }
+    }
+
+    @State private var gran: Gran = .dag
+    @State private var selected: Date?
+
+    private struct Bucket: Identifiable { let date: Date; let count: Int; var id: Date { date } }
     private struct BatteryPoint: Identifiable { let date: Date; let pct: Int; var id: Date { date } }
 
     private func date(_ a: LockActivity) -> Date? {
         DateUtils.parseAny(a.timestamp) ?? DateUtils.parseISO(a.createdAt)
     }
 
-    private enum Dir { case open, close, other }
+    // MARK: Open/close classification (language- and schema-tolerant)
 
-    /// Classify an activity as open/close, tolerant of language and schema.
+    private enum Dir { case open, close, other }
     private func classify(_ a: LockActivity) -> Dir {
         let t = ((a.msg_title ?? "") + " " + (a.msg_desc ?? "")).lowercased()
-        // Open wins first so "unlocked"/"ontgrendeld" never counts as a close.
         let openWords  = ["unlock", "opened", "geopend", "ontgrendeld", "open"]
         let closeWords = ["locked", "closed", "gesloten", "vergrendeld", "dicht", "slot dicht"]
         if openWords.contains(where: { t.contains($0) })  { return .open }
         if closeWords.contains(where: { t.contains($0) }) { return .close }
-        // Fallback on the numeric direction field (0 = open, 1 = close).
         if let d = a.direction {
             if d == 0 { return .open }
             if d == 1 { return .close }
@@ -34,18 +61,52 @@ struct StatsView: View {
 
     private var opens: Int  { activities.filter { classify($0) == .open }.count }
     private var closes: Int { activities.filter { classify($0) == .close }.count }
-
     private var lastUsed: Date? { activities.compactMap(date).max() }
     private var currentBattery: Int? { activities.compactMap { $0.batteryPercent }.first { $0 > 0 } }
 
-    private var perDay: [DayCount] {
+    // MARK: Bucketing
+
+    private func bucketStart(_ d: Date, _ cal: Calendar) -> Date {
+        switch gran {
+        case .uur:   return cal.dateInterval(of: .hour, for: d)?.start ?? d
+        case .dag:   return cal.startOfDay(for: d)
+        case .week:  return cal.dateInterval(of: .weekOfYear, for: d)?.start ?? d
+        case .maand: return cal.dateInterval(of: .month, for: d)?.start ?? d
+        }
+    }
+
+    private var buckets: [Bucket] {
         let cal = Calendar.current
-        var buckets: [Date: Int] = [:]
-        for a in activities { if let d = date(a) { buckets[cal.startOfDay(for: d), default: 0] += 1 } }
-        let today = cal.startOfDay(for: Date())
-        return (0..<14).reversed().compactMap { off -> DayCount? in
-            guard let day = cal.date(byAdding: .day, value: -off, to: today) else { return nil }
-            return DayCount(date: day, count: buckets[day] ?? 0)
+        var map: [Date: Int] = [:]
+        for a in activities { if let d = date(a) { map[bucketStart(d, cal), default: 0] += 1 } }
+        let anchor = bucketStart(Date(), cal)
+        return (0..<gran.count).reversed().compactMap { off -> Bucket? in
+            guard let d = cal.date(byAdding: gran.component, value: -off, to: anchor) else { return nil }
+            let key = bucketStart(d, cal)
+            return Bucket(date: key, count: map[key] ?? 0)
+        }
+    }
+
+    private var selectedBucket: Bucket? {
+        guard let selected else { return nil }
+        return buckets.first { $0.date == selected }
+    }
+
+    private func axisLabel(_ d: Date) -> String {
+        switch gran {
+        case .uur:   return DateUtils.timeHM(d)
+        case .dag:   return d.formatted(.dateTime.day().month(.abbreviated))
+        case .week:  return "wk " + d.formatted(.dateTime.week())
+        case .maand: return d.formatted(.dateTime.month(.abbreviated))
+        }
+    }
+
+    private func fullLabel(_ d: Date) -> String {
+        switch gran {
+        case .uur:   return d.formatted(.dateTime.day().month(.abbreviated).hour().minute())
+        case .dag:   return d.formatted(.dateTime.weekday(.wide).day().month())
+        case .week:  return "Week " + d.formatted(.dateTime.week()) + " · " + d.formatted(.dateTime.day().month())
+        case .maand: return d.formatted(.dateTime.month(.wide).year())
         }
     }
 
@@ -61,58 +122,131 @@ struct StatsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        tile("Activiteiten", "\(activities.count)", "list.bullet", .blue)
-                        tile("Batterij", currentBattery.map { "\($0)%" } ?? "–", "battery.100", (currentBattery ?? 100) < 20 ? .red : .green)
-                        tile("Geopend", "\(opens)", "lock.open", .orange)
-                        tile("Gesloten", "\(closes)", "lock", .indigo)
-                    }
-                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                    if let last = lastUsed {
-                        Text("Laatst gebruikt: \(DateUtils.absoluteWithRelative(last))")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Activiteit (14 dagen)") {
-                    if perDay.allSatisfy({ $0.count == 0 }) {
-                        Text("Nog geen activiteit in deze periode.").foregroundStyle(.secondary).font(.caption)
-                    } else {
-                        Chart(perDay) { d in
-                            BarMark(x: .value("Dag", d.date, unit: .day), y: .value("Aantal", d.count))
-                                .foregroundStyle(.blue.gradient)
-                        }
-                        .chartXAxis { AxisMarks(values: .stride(by: .day, count: 3)) { v in
-                            AxisValueLabel(format: .dateTime.day().month(.abbreviated)) } }
-                        .frame(height: 180)
-                        .padding(.vertical, 6)
-                    }
-                }
-
-                Section("Batterijverloop") {
-                    if batteryPoints.count < 2 {
-                        Text("Te weinig batterijgegevens voor een grafiek.").foregroundStyle(.secondary).font(.caption)
-                    } else {
-                        Chart(batteryPoints) { p in
-                            AreaMark(x: .value("Tijd", p.date), y: .value("Batterij", p.pct))
-                                .foregroundStyle(.green.opacity(0.12))
-                            LineMark(x: .value("Tijd", p.date), y: .value("Batterij", p.pct))
-                                .foregroundStyle(.green)
-                                .interpolationMethod(.monotone)
-                            PointMark(x: .value("Tijd", p.date), y: .value("Batterij", p.pct))
-                                .foregroundStyle(.green)
-                                .symbolSize(60)
-                        }
-                        .chartYScale(domain: 0...100)
-                        .frame(height: 160)
-                        .padding(.vertical, 6)
-                    }
-                }
+                tilesSection
+                activitySection
+                batterySection
             }
             .navigationTitle("Statistieken")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Sluit") { dismiss() } } }
+        }
+    }
+
+    // MARK: Sections
+
+    private var tilesSection: some View {
+        Section {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                tile("Activiteiten", "\(activities.count)", "list.bullet", .blue)
+                tile("Batterij", currentBattery.map { "\($0)%" } ?? "–", "battery.100",
+                     (currentBattery ?? 100) < 20 ? .red : Theme.locked)
+                tile("Geopend", "\(opens)", "lock.open", Theme.open)
+                tile("Gesloten", "\(closes)", "lock", .indigo)
+            }
+            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+            if let last = lastUsed {
+                Text("Laatst gebruikt: \(DateUtils.absoluteWithRelative(last))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var activitySection: some View {
+        Section {
+            Picker("Periode", selection: $gran) {
+                ForEach(Gran.allCases) { g in Text(g.rawValue).tag(g) }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: gran) { _ in selected = nil }
+
+            // Selected-bar callout (or hint)
+            HStack {
+                if let b = selectedBucket {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(fullLabel(b.date)).font(.subheadline.weight(.semibold))
+                        Text("\(b.count) \(b.count == 1 ? "activiteit" : "activiteiten")")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { selected = nil } label: { Image(systemName: "xmark.circle.fill") }
+                        .foregroundStyle(.secondary)
+                } else {
+                    Label("Tik op een balk voor details", systemImage: "hand.tap")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
+            .frame(minHeight: 34)
+
+            activityChart
+                .frame(height: 200)
+                .padding(.vertical, 4)
+        } header: {
+            Text("Activiteit per \(gran.rawValue.lowercased())")
+        } footer: {
+            Text("Wissel tussen uur, dag, week en maand. Tik op een balk voor het exacte aantal.")
+        }
+    }
+
+    private var activityChart: some View {
+        Chart(buckets) { b in
+            BarMark(
+                x: .value("Tijd", b.date, unit: gran.chartUnit),
+                y: .value("Aantal", b.count)
+            )
+            .foregroundStyle(selected == b.date ? Theme.accent : Color.blue.opacity(0.85))
+            .cornerRadius(4)
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 4))
+        }
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 6)) { value in
+                AxisGridLine()
+                AxisTick()
+                if let d = value.as(Date.self) {
+                    AxisValueLabel { Text(axisLabel(d)).font(.caption2) }
+                }
+            }
+        }
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle().fill(Color.clear).contentShape(Rectangle())
+                    .onTapGesture { location in
+                        let plot = geo[proxy.plotAreaFrame]
+                        let xPos = location.x - plot.origin.x
+                        guard xPos >= 0, xPos <= plot.width,
+                              let tapped: Date = proxy.value(atX: xPos) else { return }
+                        if let nearest = buckets.min(by: {
+                            abs($0.date.timeIntervalSince(tapped)) < abs($1.date.timeIntervalSince(tapped))
+                        }) {
+                            Haptic.tap(.light)
+                            selected = (selected == nearest.date) ? nil : nearest.date
+                        }
+                    }
+            }
+        }
+    }
+
+    private var batterySection: some View {
+        Section("Batterijverloop") {
+            if batteryPoints.count < 2 {
+                Text("Te weinig batterijgegevens voor een grafiek.").foregroundStyle(.secondary).font(.caption)
+            } else {
+                Chart(batteryPoints) { p in
+                    AreaMark(x: .value("Tijd", p.date), y: .value("Batterij", p.pct))
+                        .foregroundStyle(Theme.locked.opacity(0.12))
+                    LineMark(x: .value("Tijd", p.date), y: .value("Batterij", p.pct))
+                        .foregroundStyle(Theme.locked)
+                        .interpolationMethod(.monotone)
+                    PointMark(x: .value("Tijd", p.date), y: .value("Batterij", p.pct))
+                        .foregroundStyle(Theme.locked)
+                        .symbolSize(50)
+                }
+                .chartYScale(domain: 0...100)
+                .frame(height: 160)
+                .padding(.vertical, 6)
+            }
         }
     }
 
