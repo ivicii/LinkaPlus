@@ -813,7 +813,7 @@ struct LockDetailView: View {
                 let raw = (error as? LocalizedError)?.errorDescription ?? "\(error)"
                 if raw.localizedCaseInsensitiveContains("not currently")
                     || raw.localizedCaseInsensitiveContains("not active") {
-                    sirenMessage = "Het slot is nu niet live online, dus de cloud-sirene lukt niet (\"\(raw)\"). Ga dichtbij het slot en gebruik de Bluetooth-knop zodra 'Verbonden' verschijnt."
+                    sirenMessage = "Het slot heeft nu geen actieve sessie met de server (\"\(raw)\"). De LEO slaapt om batterij te sparen en meldt zich maar af en toe — probeer het zo nog eens, of wek het slot door het te bewegen. Vlakbij werkt de Bluetooth-sirene altijd."
                 } else {
                     sirenMessage = "Mislukt: \(raw)"
                 }
