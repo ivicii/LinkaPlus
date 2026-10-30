@@ -36,6 +36,7 @@ struct LockDetailView: View {
     @State private var showSettings = false
     @State private var showFullMap = false
     @State private var showFirmware = false
+    @State private var showLockSettings = false
 
     private var liveLocked: Bool { ble.liveLocked ?? lock.is_locked ?? true }
 
@@ -132,6 +133,9 @@ struct LockDetailView: View {
         .sheet(isPresented: $showFullMap) { fullMapSheet }
         .sheet(isPresented: $showFirmware) {
             FirmwareView().environmentObject(session)
+        }
+        .sheet(isPresented: $showLockSettings) {
+            LockSettingsView(ble: ble, serial: lock.serial_no)
         }
         .sheet(isPresented: $showBLE) {
             BLEDiagnosticsView(lockName: lock.displayName)
@@ -351,6 +355,7 @@ struct LockDetailView: View {
     @ViewBuilder
     private var beheerSection: some View {
         Section("Beheer") {
+            Button { showLockSettings = true } label: { Label("Alle slotinstellingen", systemImage: "slider.horizontal.3") }
             Button { showStats = true } label: { Label("Statistieken", systemImage: "chart.bar.fill") }
             Button { showSharing = true } label: { Label("Delen & toegang", systemImage: "person.2.fill") }
             Button { renameText = lock.displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }

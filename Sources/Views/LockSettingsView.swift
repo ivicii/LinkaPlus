@@ -1,0 +1,131 @@
+import SwiftUI
+
+/// Full lock-settings screen. Parameter indices reverse-engineered from the
+/// official app's LockController (confirmed against the working 106/5 = movement
+/// alarm). Writes go over Bluetooth; the lock must be connected.
+struct LockSettingsView: View {
+    @ObservedObject var ble: BLEController
+    let serial: String?
+    @Environment(\.dismiss) var dismiss
+
+    // On/off settings (remembered per lock)
+    @State private var autoLock = false
+    @State private var quickLock = false
+
+    // Numeric settings (value sent on "Schrijf")
+    @State private var bump = 5
+    @State private var stall = 3
+    @State private var alarmDelay = 5
+    @State private var alarmTime = 30
+    @State private var lockSleep = 30
+    @State private var unlockSleep = 30
+
+    // Advanced raw write
+    @State private var rawIdx = ""
+    @State private var rawVal = ""
+
+    private var connected: Bool { ble.ready }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if !connected {
+                    Section {
+                        Label("Niet verbonden — ga dichtbij je slot. Instellingen zijn uitgeschakeld tot 'Verbonden'.",
+                              systemImage: "antenna.radiowaves.left.and.right.slash")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                }
+
+                commandResultRow
+
+                Section("Vergrendeling") {
+                    Toggle(isOn: Binding(
+                        get: { autoLock },
+                        set: { v in autoLock = v; LockPrefs.setBool(v, key: "autoLock", serial: serial); if connected { ble.setAutolock(v) } }
+                    )) { Label("Auto-lock", systemImage: "lock.rotation") }
+                    Toggle(isOn: Binding(
+                        get: { quickLock },
+                        set: { v in quickLock = v; LockPrefs.setBool(v, key: "quickLock", serial: serial); if connected { ble.setQuickLock(v) } }
+                    )) { Label("Quick-lock", systemImage: "bolt.horizontal") }
+                }
+                .disabled(!connected)
+
+                Section {
+                    numeric("Bump-gevoeligheid", value: $bump, range: 1...20, icon: "waveform.path") { ble.setBumpThreshold($0) }
+                    numeric("Stall-delay", value: $stall, range: 0...30, icon: "hourglass") { ble.setStall($0) }
+                    numeric("Alarm-delay", value: $alarmDelay, range: 0...60, icon: "timer") { ble.setAlarmDelay($0) }
+                    numeric("Alarm-tijd", value: $alarmTime, range: 0...255, icon: "alarm") { ble.setAlarmTime($0) }
+                } header: {
+                    Text("Alarm & gevoeligheid")
+                } footer: {
+                    Text("Eenheden zijn niet officieel gedocumenteerd — stel in en kijk naar het gedrag van je slot. De waarde wordt pas geschreven als je op ‘Schrijf’ tikt.")
+                }
+                .disabled(!connected)
+
+                Section {
+                    numeric("Lock-sleep", value: $lockSleep, range: 0...255, icon: "moon.zzz") { ble.setLockSleep($0) }
+                    numeric("Unlock-sleep", value: $unlockSleep, range: 0...255, icon: "moon") { ble.setUnlockSleep($0) }
+                } header: {
+                    Text("Energie (sleep)")
+                } footer: {
+                    Text("Hoe lang het slot wacht voor het in slaapstand gaat. Langer = sneller reageren, meer batterijverbruik.")
+                }
+                .disabled(!connected)
+
+                Section {
+                    HStack {
+                        TextField("index", text: $rawIdx).keyboardType(.numberPad).frame(width: 70)
+                        Divider()
+                        TextField("waarde", text: $rawVal).keyboardType(.numberPad)
+                        Button("Schrijf") {
+                            if let i = Int(rawIdx), let v = Int(rawVal), connected { ble.writeSetting(idx: i, value: v) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!connected || Int(rawIdx) == nil || Int(rawVal) == nil)
+                    }
+                } header: {
+                    Text("Parameter schrijven (geavanceerd)")
+                } footer: {
+                    Text("Schrijf elke parameter-index + waarde rechtstreeks. Bekend: 1=PAC, 5=stall, 7=alarm-delay, 10=bump, 12=audio, 17=lock-sleep, 30/50=unlock-sleep, 37=alarm-tijd, 55=quick-lock, 102=auto-lock, 106=beweeg-alarm. ⚠︎ Onbekende indexen/waarden op eigen risico.")
+                }
+                .disabled(!connected)
+            }
+            .navigationTitle("Slotinstellingen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Sluit") { dismiss() } } }
+            .onAppear {
+                autoLock = LockPrefs.bool("autoLock", serial: serial)
+                quickLock = LockPrefs.bool("quickLock", serial: serial)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var commandResultRow: some View {
+        switch ble.commandResult {
+        case .success(let n):
+            Label("\(n) gelukt", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.callout)
+        case .rejected:
+            Label("Geweigerd — probeer opnieuw", systemImage: "xmark.circle.fill").foregroundStyle(.red).font(.callout)
+        case .blocked(let n):
+            Label("\(n): niet gelukt", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.callout)
+        case .timeout:
+            Label("Geen reactie van het slot", systemImage: "clock.badge.exclamationmark").foregroundStyle(.secondary).font(.callout)
+        case .none:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func numeric(_ title: String, value: Binding<Int>, range: ClosedRange<Int>,
+                         icon: String, write: @escaping (Int) -> Void) -> some View {
+        HStack {
+            Stepper(value: value, in: range) {
+                Label("\(title): \(value.wrappedValue)", systemImage: icon)
+            }
+            Button("Schrijf") { write(value.wrappedValue) }
+                .buttonStyle(.bordered).font(.footnote)
+        }
+    }
+}

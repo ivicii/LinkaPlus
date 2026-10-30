@@ -239,6 +239,45 @@ final class BLEController: NSObject, ObservableObject {
                     name: on ? "Beweeg-alarm aan" : "Beweeg-alarm uit") { self.movementAlarmOn = on }
     }
 
+    // MARK: Lock settings (parameter indices confirmed from the official app)
+
+    func setAutolock(_ on: Bool) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 102, value: on ? 20 : 0),
+                    name: on ? "Auto-lock aan" : "Auto-lock uit")
+    }
+    func setQuickLock(_ on: Bool) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 55, value: on ? 1 : 0),
+                    name: on ? "Quick-lock aan" : "Quick-lock uit")
+    }
+    func setBumpThreshold(_ v: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 10, value: v), name: "Bump-gevoeligheid \(v)")
+    }
+    func setStall(_ v: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 5, value: v), name: "Stall-delay \(v)")
+    }
+    func setAlarmDelay(_ v: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 7, value: v), name: "Alarm-delay \(v)")
+    }
+    func setAlarmTime(_ v: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 37, value: v), name: "Alarm-tijd \(v)")
+    }
+    func setLockSleep(_ v: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 17, value: v), name: "Lock-sleep \(v)")
+    }
+    /// Unlock sleep: the official app writes both index 30 and 50. The lock
+    /// hands us a fresh counter after the first, so send the second shortly after.
+    func setUnlockSleep(_ v: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 30, value: v), name: "Unlock-sleep \(v)")
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            sendPayload(LinkaCrypto.settingPayload(idx: 50, value: v), name: "Unlock-sleep (2) \(v)")
+        }
+    }
+    /// Raw parameter write — for advanced/experimental settings.
+    func writeSetting(idx: Int, value: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: idx, value: value), name: "Param \(idx) = \(value)")
+    }
+
     private func sendPayload(_ payload: [UInt8], name: String, expectActuation: Bool = false, onSuccess: (() -> Void)? = nil) {
         let ch = (channel == 1) ? write0016 : write0002
         guard let ch = ch else { add("Geen write-characteristic."); return }

@@ -37,4 +37,13 @@ enum LockPrefs {
         guard let serial else { return false }
         return UserDefaults.standard.bool(forKey: "movementAlarm_\(serial)")
     }
+
+    static func setBool(_ on: Bool, key: String, serial: String?) {
+        guard let serial else { return }
+        UserDefaults.standard.set(on, forKey: "\(key)_\(serial)")
+    }
+    static func bool(_ key: String, serial: String?) -> Bool {
+        guard let serial else { return false }
+        return UserDefaults.standard.bool(forKey: "\(key)_\(serial)")
+    }
 }
