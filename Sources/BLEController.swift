@@ -21,6 +21,35 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var testing = false
     @Published private(set) var log: [String] = []
 
+    // Live telemetry decoded from the lock's status/info packet (command 0x0A).
+    @Published private(set) var infoUptime: UInt32?
+    @Published private(set) var infoRSSIpkt: Int?
+    @Published private(set) var accelG: SIMD3<Double>?
+    @Published private(set) var infoExtra: Int?
+    @Published private(set) var infoRaw: String?
+    @Published private(set) var infoAt: Date?
+
+    /// Parse a LINKA LockInfoPacket (byte[1] == 0x0A). Layout (little-endian):
+    /// [3]=rssi(int8), [4..7]=uptime(u32), [8..9]/[10..11]/[12..13]=accel x/y/z
+    /// (int16 × 6.3e-5 ≈ g), [14..15]=extra(int16).
+    private func parseInfoPacket(_ d: [UInt8]) {
+        guard d.count >= 16, d[1] == 0x0A else { return }
+        func le16(_ i: Int) -> Int {
+            let v = Int(d[i]) | (Int(d[i + 1]) << 8)
+            return v >= 0x8000 ? v - 0x10000 : v
+        }
+        func le32(_ i: Int) -> UInt32 {
+            UInt32(d[i]) | (UInt32(d[i+1]) << 8) | (UInt32(d[i+2]) << 16) | (UInt32(d[i+3]) << 24)
+        }
+        infoRSSIpkt = Int(Int8(bitPattern: d[3]))
+        infoUptime = le32(4)
+        let s = 6.3e-5
+        accelG = SIMD3(Double(le16(8)) * s, Double(le16(10)) * s, Double(le16(12)) * s)
+        infoExtra = le16(14)
+        infoRaw = LinkaCrypto.toHex(d)
+        infoAt = Date()
+    }
+
     enum CommandResult: Equatable {
         case success(String)   // actuated
         case rejected          // wrong key/counter
@@ -293,6 +322,8 @@ extension BLEController: CBPeripheralDelegate {
         let data = [UInt8](characteristic.value ?? Data())
         let uuid = characteristic.uuid.uuidString
         Task { @MainActor in
+            // Decode live telemetry from any status/info packet (command 0x0A).
+            parseInfoPacket(data)
             // The command context is the 0x12-prefixed frame (encVer 2).
             if data.count >= 7, data[0] == 0x12 {
                 ctxEncVer = Int(data[2])

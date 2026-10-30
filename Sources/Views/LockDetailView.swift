@@ -94,6 +94,8 @@ struct LockDetailView: View {
             bleControlSection
 
             soundSection
+
+            sensorsSection
         }
         .navigationTitle(lock.displayName)
         .navigationBarTitleDisplayMode(.inline)
@@ -419,6 +421,51 @@ struct LockDetailView: View {
             } else {
                 Text("Tijd van laatste locatie onbekend. Tik op de kaart om te vergroten.")
             }
+        }
+    }
+
+    private func uptimeText(_ s: UInt32) -> String {
+        let t = Int(s)
+        let d = t / 86400, h = (t % 86400) / 3600, m = (t % 3600) / 60
+        if d > 0 { return "\(d)d \(h)u" }
+        if h > 0 { return "\(h)u \(m)m" }
+        return "\(m)m"
+    }
+
+    @ViewBuilder
+    private var sensorsSection: some View {
+        Section {
+            if let a = ble.accelG {
+                let tilt = atan2((a.x * a.x + a.y * a.y).squareRoot(), abs(a.z)) * 180 / .pi
+                statusRow("Kanteling", value: String(format: "%.0f°", tilt), systemImage: "gyroscope")
+                statusRow("Versnelling X/Y/Z",
+                          value: String(format: "%.2f / %.2f / %.2f g", a.x, a.y, a.z),
+                          systemImage: "move.3d")
+            }
+            if let u = ble.infoUptime {
+                statusRow("Uptime", value: uptimeText(u), systemImage: "clock.arrow.circlepath")
+            }
+            if let r = ble.infoRSSIpkt {
+                statusRow("Signaal (pakket)", value: "\(r) dBm", systemImage: "antenna.radiowaves.left.and.right")
+            }
+            if let e = ble.infoExtra {
+                statusRow("Extra (ongelabeld)", value: "\(e)", systemImage: "number")
+            }
+            if let raw = ble.infoRaw {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Ruw statuspakket (voor kalibratie)").font(.caption).foregroundStyle(.secondary)
+                    Text(raw).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
+                }
+            }
+            if ble.infoAt == nil {
+                Text(ble.ready ? "Wachten op statuspakket van het slot…"
+                               : "Verbind via Bluetooth om sensordata te zien.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Sensoren (live)")
+        } footer: {
+            Text("Live uit het slot. Kanteling/accel, uptime en signaal zijn geijkt. Voltage en temperatuur zitten in een ander pakket — deel de ruwe hex hierboven, dan maak ik er accu-spanning en °C van.")
         }
     }
 
