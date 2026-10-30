@@ -1,0 +1,56 @@
+version: 2.1
+
+# Alternative macOS build on CircleCI (free tier: 30,000 credits/month,
+# works on private repos). Connect the repo at app.circleci.com, then this
+# config builds an unsigned IPA and stores it as a downloadable artifact.
+jobs:
+  build-unsigned:
+    macos:
+      # If this image is unavailable, the error lists valid versions —
+      # just change this to one of those.
+      xcode: "16.2.0"
+    resource_class: macos.m1.medium.gen1
+    steps:
+      - checkout
+      - run:
+          name: Install XcodeGen
+          command: brew install xcodegen
+      - run:
+          name: Generate Xcode project
+          command: |
+            xcodegen generate --spec project.yml
+            xcodebuild -list -project LinkaPlus.xcodeproj || true
+      - run:
+          name: Build (no code signing)
+          command: |
+            set -o pipefail
+            xcodebuild \
+              -project LinkaPlus.xcodeproj \
+              -scheme LinkaPlus \
+              -configuration Release \
+              -sdk iphoneos \
+              -destination 'generic/platform=iOS' \
+              -derivedDataPath build \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              ONLY_ACTIVE_ARCH=NO \
+              clean build
+      - run:
+          name: Package into .ipa
+          command: |
+            set -eo pipefail
+            APP_PATH="build/Build/Products/Release-iphoneos/LinkaPlus.app"
+            test -d "$APP_PATH" || { echo "Build output missing"; exit 1; }
+            rm -rf Payload LinkaPlus.ipa
+            mkdir -p Payload
+            cp -R "$APP_PATH" Payload/
+            zip -qry LinkaPlus.ipa Payload
+      - store_artifacts:
+          path: LinkaPlus.ipa
+          destination: LinkaPlus.ipa
+
+workflows:
+  build:
+    jobs:
+      - build-unsigned
