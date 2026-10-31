@@ -22,10 +22,15 @@ struct LockSettingsView: View {
     @State private var rollAngle = 45
     @State private var tiltAngle = 45
     @State private var jostle = 5
+    @State private var accelRate = 2
+    @State private var pulseTap = 1
 
     // Advanced raw write
     @State private var rawIdx = ""
     @State private var rawVal = ""
+
+    @State private var showDefaultConfirm = false
+    @State private var showBondsConfirm = false
 
     private var connected: Bool { ble.ready }
 
@@ -70,10 +75,54 @@ struct LockSettingsView: View {
                     numeric("Roll-hoek (zijwaarts)", value: $rollAngle, range: 0...90, icon: "rotate.3d") { ble.setRollAngle($0) }
                     numeric("Tilt-hoek (voor/achter)", value: $tiltAngle, range: 0...90, icon: "gyroscope") { ble.setTiltAngle($0) }
                     numeric("Jostle (schudgevoeligheid)", value: $jostle, range: 0...30, icon: "waveform") { ble.setJostle($0) }
+                    numeric("Accel data-rate", value: $accelRate, range: 0...10, icon: "speedometer") { ble.setAccelDataRate($0) }
+                    numeric("Pulse-tap", value: $pulseTap, range: 0...10, icon: "hand.tap") { ble.setPulseTap($0) }
                 } header: {
-                    Text("Kanteling-alarm (hoeken)")
+                    Text("Kanteling-alarm & gevoeligheid")
                 } footer: {
-                    Text("Hoek in graden waarbij het alarm afgaat als de fiets kantelt. Roll = zijwaarts, Tilt = voor/achter.")
+                    Text("Hoek in graden waarbij het alarm afgaat als de fiets kantelt (roll = zijwaarts, tilt = voor/achter). Accel-datarate en pulse-tap regelen hoe fijn de sensor meet.")
+                }
+                .disabled(!connected)
+
+                Section {
+                    Button { ble.statePing() } label: { Label("State-ping (status opvragen)", systemImage: "dot.radiowaves.up.forward") }
+                    Button { ble.reboot() } label: { Label("Herstart slot", systemImage: "arrow.clockwise.circle") }
+                    Button { ble.sleepLock() } label: { Label("Slaapstand", systemImage: "moon.zzz") }
+                } header: {
+                    Text("Onderhoud")
+                } footer: {
+                    Text("Herstart start de slot-firmware opnieuw op. Slaapstand zet 'm in energiebesparing (ontwaakt bij beweging/BLE).")
+                }
+                .disabled(!connected)
+
+                Section {
+                    Button { ble.readPAC() } label: { Label("Lees PAC-code", systemImage: "number.square") }
+                    Button { ble.readActuations() } label: { Label("Lees actuations (totaalteller)", systemImage: "number") }
+                    if let hex = ble.lastReadHex {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Antwoord (\(ble.lastReadLabel ?? "")) — ruw, versleuteld:")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(hex).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
+                        }
+                    }
+                } header: {
+                    Text("Uitlezen (experimenteel)")
+                } footer: {
+                    Text("Het slot antwoordt versleuteld (statische sleutel). De ruwe respons wordt hier getoond zodat we 'm kunnen decoderen naar de echte PAC/teller.")
+                }
+                .disabled(!connected)
+
+                Section {
+                    Button(role: .destructive) { showDefaultConfirm = true } label: {
+                        Label("Standaardinstellingen herstellen", systemImage: "arrow.counterclockwise")
+                    }
+                    Button(role: .destructive) { showBondsConfirm = true } label: {
+                        Label("Bluetooth-koppelingen wissen", systemImage: "trash")
+                    }
+                } header: {
+                    Text("Gevaarlijk")
+                } footer: {
+                    Text("Deze acties resetten instellingen of ontkoppelen apparaten. Gebruik met beleid.")
                 }
                 .disabled(!connected)
 
@@ -108,6 +157,18 @@ struct LockSettingsView: View {
             .navigationTitle("Slotinstellingen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Sluit") { dismiss() } } }
+            .alert("Standaardinstellingen herstellen?", isPresented: $showDefaultConfirm) {
+                Button("Annuleer", role: .cancel) {}
+                Button("Herstellen", role: .destructive) { ble.defaultSettings() }
+            } message: {
+                Text("Dit zet alle slotinstellingen terug naar fabrieksstandaard.")
+            }
+            .alert("Koppelingen wissen?", isPresented: $showBondsConfirm) {
+                Button("Annuleer", role: .cancel) {}
+                Button("Wissen", role: .destructive) { ble.deleteBonds() }
+            } message: {
+                Text("Dit verwijdert alle Bluetooth-koppelingen van het slot. Je moet daarna opnieuw verbinden.")
+            }
             .onAppear {
                 autoLock = LockPrefs.bool("autoLock", serial: serial)
                 quickLock = LockPrefs.bool("quickLock", serial: serial)

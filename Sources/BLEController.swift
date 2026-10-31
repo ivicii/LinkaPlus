@@ -29,6 +29,11 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var infoRaw: String?
     @Published private(set) var infoAt: Date?
 
+    // Raw response captured after a READ-setting request (for decoding).
+    @Published private(set) var lastReadHex: String?
+    @Published private(set) var lastReadLabel: String?
+    private var awaitingRead: String?
+
     /// Parse a LINKA LockInfoPacket (byte[1] == 0x0A). Layout (little-endian):
     /// [3]=rssi(int8), [4..7]=uptime(u32), [8..9]/[10..11]/[12..13]=accel x/y/z
     /// (int16 × 6.3e-5 ≈ g), [14..15]=extra(int16).
@@ -296,6 +301,30 @@ final class BLEController: NSObject, ObservableObject {
         sendPayload(LinkaCrypto.settingPayload(idx: idx, value: value), name: "Param \(idx) = \(value)")
     }
 
+    func setAccelDataRate(_ v: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 16, value: v), name: "Accel-datarate \(v)")
+    }
+    func setPulseTap(_ v: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 13, value: v), name: "Pulse-tap \(v)")
+    }
+
+    // MARK: Commands (opcodes from the firmware command map)
+    func reboot()          { sendPayload([31, 0], name: "Herstart") }
+    func sleepLock()       { sendPayload([9, 0],  name: "Slaapstand") }
+    func statePing()       { sendPayload([27, 7], name: "State-ping") }
+    func defaultSettings() { sendPayload([12, 0], name: "Standaardinstellingen herstellen") }
+    func deleteBonds()     { sendPayload([13, 0], name: "Bluetooth-koppelingen wissen") }
+
+    // MARK: Reads — response is encrypted; captured raw for decoding.
+    func readPAC() {
+        awaitingRead = "PAC"; lastReadHex = nil
+        sendPayload(LinkaCrypto.readPayload(idx: 1), name: "Lees PAC")
+    }
+    func readActuations() {
+        awaitingRead = "Actuations"; lastReadHex = nil
+        sendPayload(LinkaCrypto.readPayload(idx: 2), name: "Lees actuations")
+    }
+
     private func sendPayload(_ payload: [UInt8], name: String, expectActuation: Bool = false, onSuccess: (() -> Void)? = nil) {
         let ch = (channel == 1) ? write0016 : write0002
         guard let ch = ch else { add("Geen write-characteristic."); return }
@@ -399,7 +428,14 @@ extension BLEController: CBPeripheralDelegate {
                 handleEvent(s)
                 add("· \(s)")
             } else {
-                add("← \(uuid.prefix(8)): \(LinkaCrypto.toHex(data))")
+                if let label = awaitingRead {
+                    lastReadHex = LinkaCrypto.toHex(data)
+                    lastReadLabel = label
+                    awaitingRead = nil
+                    add("READ(\(label)) resp: \(LinkaCrypto.toHex(data))")
+                } else {
+                    add("← \(uuid.prefix(8)): \(LinkaCrypto.toHex(data))")
+                }
             }
         }
     }
