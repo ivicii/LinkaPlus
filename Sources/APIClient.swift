@@ -267,10 +267,21 @@ struct APIClient {
 
     /// The firmware image the official app would download for the LEO2 / Lasso.
     func consumerAppVersion(auth: Identity) async throws -> ConsumerAppVersion {
-        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/consumer_app_version"))
-        req.httpMethod = "GET"
-        authorize(&req, auth: auth)
-        return try await decodeObject(req, as: ConsumerAppVersion.self)
+        let url = Self.baseURL.appendingPathComponent("/api/consumer_app_version")
+        var lastError: Error = APIError.noData
+        // The retrofit verb isn't exposed in the APK; try the common ones.
+        for method in ["POST", "PUT", "GET"] {
+            var req = URLRequest(url: url)
+            req.httpMethod = method
+            if method != "GET" { setForm([:], on: &req) }
+            authorize(&req, auth: auth)
+            do {
+                return try await decodeObject(req, as: ConsumerAppVersion.self)
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
     }
 
     /// Download a file (e.g. the firmware .zip) to a temporary local file.

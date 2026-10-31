@@ -169,6 +169,11 @@ final class BLEController: NSObject, ObservableObject {
         central = CBCentralManager(delegate: self, queue: .main)
     }
 
+    deinit {
+        central?.stopScan()
+        if let p = peripheral { central?.cancelPeripheralConnection(p) }
+    }
+
     func fullLog() -> String { log.reversed().joined(separator: "\n") }
 
     /// Interpret the firmware ASCII debug log.
@@ -194,17 +199,21 @@ final class BLEController: NSObject, ObservableObject {
         if log.count > 300 { log.removeLast() }
     }
 
+    private var intentionalStop = false
+
     func start() {
         guard subkey.count == 16, mac.count == 6 else {
             add("Config onvolledig (key \(subkey.count)B, mac \(mac.count)B)."); return
         }
         guard central.state == .poweredOn else { add("Bluetooth niet aan."); return }
+        intentionalStop = false
         state = "scannen"; ready = false
         add("Scannen naar slot…")
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
 
     func stop() {
+        intentionalStop = true
         central.stopScan()
         if let p = peripheral { central.cancelPeripheralConnection(p) }
         state = "gestopt"; ready = false; rssi = nil
@@ -339,7 +348,14 @@ extension BLEController: CBCentralManagerDelegate {
         Task { @MainActor in state = "services"; peripheral.discoverServices([LinkaBLE.service]) }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        Task { @MainActor in ready = false; state = "verbroken"; add("Verbinding verbroken.") }
+        Task { @MainActor in
+            ready = false; state = "verbroken"; add("Verbinding verbroken.")
+            // Auto-reconnect unless the user intentionally stopped.
+            if !intentionalStop, subkey.count == 16, mac.count == 6 {
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                if !intentionalStop && !ready { start() }
+            }
+        }
     }
 }
 

@@ -37,6 +37,7 @@ struct LockDetailView: View {
     @State private var showFullMap = false
     @State private var showFirmware = false
     @State private var showLockSettings = false
+    @State private var heroLocked = true
 
     private var liveLocked: Bool { ble.liveLocked ?? lock.is_locked ?? true }
 
@@ -89,18 +90,25 @@ struct LockDetailView: View {
     }
 
     var body: some View {
-        List {
-            mapSection
-
-            bleControlSection
-
-            soundSection
-
-            sensorsSection
+        VStack(spacing: 12) {
+            compactMap
+            Spacer(minLength: 2)
+            heroControl
+            Spacer(minLength: 2)
+            mainButtons
         }
+        .padding(.horizontal)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(lock.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    Haptic.tap()
+                    if ble.ready { ble.sirenOn() } else { playSiren() }
+                } label: { Image(systemName: "speaker.wave.3.fill") }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button { showSettings = true } label: {
                     Image(systemName: "slider.horizontal.3")
@@ -110,13 +118,14 @@ struct LockDetailView: View {
         .navigationDestination(isPresented: $showSettings) { settingsPage }
         .task {
             movementAlarmOn = LockPrefs.movementAlarm(serial: lock.serial_no)
+            heroLocked = ble.liveLocked ?? lock.is_locked ?? true
             loc.start()
             await startBLE()
             await load()
             await syncRecoveryState()
             loadSim()
         }
-        .onDisappear { ble.stop() }
+        .onChange(of: ble.liveLocked) { v in if let v { heroLocked = v } }
         .onChange(of: ble.ctxCounter) { _ in maybeAutoUnlock() }
         .onChange(of: router.unlockRequested) { _ in maybeAutoUnlock() }
         .refreshable {
@@ -542,6 +551,7 @@ struct LockDetailView: View {
     private var settingsPage: some View {
         List {
             statusSection
+            sensorsSection
             dataplanSection
             if ble.ready { slotinstellingenSection }
             trackingSection
@@ -599,55 +609,35 @@ struct LockDetailView: View {
     }
 
     private var heroControl: some View {
-        VStack(spacing: 18) {
-            // Connection pill
+        VStack(spacing: 14) {
             HStack(spacing: 7) {
                 Circle()
                     .fill(ble.ready ? Theme.locked : Color.orange)
                     .frame(width: 9, height: 9)
-                Text(bleStatusText)
-                    .font(.subheadline.weight(.semibold))
-                if !ble.ready && bleKeyError == nil {
-                    ProgressView().scaleEffect(0.7)
-                }
+                Text(bleStatusText).font(.subheadline.weight(.semibold))
+                if !ble.ready && bleKeyError == nil { ProgressView().scaleEffect(0.7) }
             }
             .foregroundStyle(.secondary)
 
-            // Big tactile lock button
+            // Lock-shaped control — the bolt bar slides to follow open/close.
             Button {
                 Haptic.tap()
-                guard let locked = knownLocked else {
-                    // State unknown → nudge the user to the explicit buttons.
-                    Haptic.warning()
-                    return
-                }
+                guard let locked = knownLocked else { Haptic.warning(); return }
+                heroLocked = !locked
                 ble.channel = 0; ble.counterOffset = 0
                 if locked { ble.unlock() } else { ble.lock() }
             } label: {
-                ZStack {
-                    Circle()
-                        .fill(Theme.grad(heroColor))
-                        .frame(width: 184, height: 184)
-                        .shadow(color: heroColor.opacity(0.45), radius: 22, y: 10)
-                    Circle()
-                        .stroke(Color.white.opacity(0.22), lineWidth: 2)
-                        .frame(width: 184, height: 184)
-                    VStack(spacing: 10) {
-                        Image(systemName: heroIcon)
-                            .font(.system(size: 58, weight: .bold))
-                        Text(heroSubtitle)
-                            .font(.footnote.weight(.semibold))
-                            .multilineTextAlignment(.center)
-                    }
-                    .foregroundStyle(.white)
-                }
+                LockGraphic(locked: heroLocked, color: heroColor, size: 190)
             }
             .buttonStyle(PressableStyle())
             .disabled(!ble.ready)
             .opacity(ble.ready ? 1 : 0.55)
-            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: knownLocked)
 
-            // Quick stats
+            Text(heroSubtitle)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
             HStack(spacing: 22) {
                 heroStat(statusText, statusIcon, heroColor)
                 if let b = latestBattery {
@@ -659,16 +649,9 @@ struct LockDetailView: View {
             }
             .font(.caption)
 
-            if knownLocked == nil && ble.ready {
-                Text("Kies hieronder Openen of Sluiten — de stand wordt daarna automatisch bijgehouden.")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
             commandResultRow
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
     }
 
     private func heroStat(_ text: String, _ icon: String, _ color: Color) -> some View {
@@ -679,19 +662,47 @@ struct LockDetailView: View {
         .frame(minWidth: 56)
     }
 
-    @ViewBuilder
-    private var bleControlSection: some View {
-        Section {
-            heroControl
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+    private var compactMap: some View {
+        Button { showFullMap = true } label: {
+            mapView
+                .frame(height: 148)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.primary)
+                        .padding(7)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .padding(8)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    if let d = lastLocationDate {
+                        Label(DateUtils.relative(d), systemImage: "clock")
+                            .font(.caption2)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(8)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+    }
 
+    @ViewBuilder
+    private var mainButtons: some View {
+        VStack(spacing: 10) {
             HStack(spacing: 12) {
-                Button { Haptic.tap(.light); ble.channel = 0; ble.counterOffset = 0; ble.unlock() } label: {
+                Button {
+                    Haptic.tap(.light); heroLocked = false
+                    ble.channel = 0; ble.counterOffset = 0; ble.unlock()
+                } label: {
                     Label("Openen", systemImage: "lock.open.fill").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).tint(Theme.open)
-                Button { Haptic.tap(.light); ble.channel = 0; ble.counterOffset = 0; ble.lock() } label: {
+                Button {
+                    Haptic.tap(.light); heroLocked = true
+                    ble.channel = 0; ble.counterOffset = 0; ble.lock()
+                } label: {
                     Label("Sluiten", systemImage: "lock.fill").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).tint(Theme.locked)
@@ -699,21 +710,23 @@ struct LockDetailView: View {
             .controlSize(.large)
             .disabled(!ble.ready)
 
-            if ble.ready {
-                Button { showFinder = true } label: {
-                    Label("Zoek je slot (signaalsterkte)", systemImage: "dot.radiowaves.left.and.right")
+            HStack(spacing: 14) {
+                if ble.ready {
+                    Button { showFinder = true } label: {
+                        Label("Zoek je slot", systemImage: "dot.radiowaves.left.and.right").font(.footnote)
+                    }
                 }
-            }
-            if ble.state == "verbroken" || ble.state == "gestopt" {
-                Button { ble.start() } label: {
-                    Label("Opnieuw verbinden", systemImage: "arrow.clockwise")
+                Spacer()
+                if ble.state == "verbroken" || ble.state == "gestopt" {
+                    Button { ble.start() } label: {
+                        Label("Herverbind", systemImage: "arrow.clockwise").font(.footnote)
+                    }
                 }
             }
             if let e = bleKeyError {
-                Text(e).font(.caption).foregroundStyle(.red)
+                Text(e).font(.caption2).foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-        } footer: {
-            Text("Verbindt automatisch als je dichtbij bent. Houd het slot stil bij het sluiten.")
         }
     }
 
