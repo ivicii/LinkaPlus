@@ -22,11 +22,16 @@ struct FirmwareView: View {
                 Section("Jouw slot") {
                     row("Huidige firmware", ble.fwRevision ?? (ble.ready ? "uitlezen…" : "verbind via Bluetooth"))
                     if let cur = ble.fwRevision, let avail = info?.leo2_firmware_version {
-                        if cur == avail {
+                        let c = compareVersions(cur, avail)
+                        if c > 0 {
+                            Label("Jouw slot (\(cur)) is nieuwer dan het app-kanaal (\(avail))",
+                                  systemImage: "checkmark.seal.fill")
+                                .foregroundStyle(.green).font(.callout)
+                        } else if c == 0 {
                             Label("Up-to-date", systemImage: "checkmark.seal.fill")
                                 .foregroundStyle(.green).font(.callout)
                         } else {
-                            Label("Beschikbaar via app: \(avail)", systemImage: "arrow.up.circle.fill")
+                            Label("Update beschikbaar via app: \(avail)", systemImage: "arrow.up.circle.fill")
                                 .foregroundStyle(Theme.accent).font(.callout)
                         }
                     }
@@ -94,6 +99,18 @@ struct FirmwareView: View {
         if let downloadError {
             Text(downloadError).font(.caption).foregroundStyle(.red)
         }
+    }
+
+    /// Compare dotted version strings numerically: >0 if a newer, <0 if b newer, 0 equal.
+    private func compareVersions(_ a: String, _ b: String) -> Int {
+        let av = a.split(separator: ".").map { Int($0) ?? 0 }
+        let bv = b.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(av.count, bv.count) {
+            let x = i < av.count ? av[i] : 0
+            let y = i < bv.count ? bv[i] : 0
+            if x != y { return x < y ? -1 : 1 }
+        }
+        return 0
     }
 
     private func row(_ title: String, _ value: String?) -> some View {
