@@ -30,9 +30,15 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var infoAt: Date?
 
     // Raw response captured after a READ-setting request (for decoding).
+    // The device replies with an ACK frame first and (for value reads) a
+    // second data frame. We capture EVERY frame for a short window so the
+    // value frame is not lost behind the ack.
     @Published private(set) var lastReadHex: String?
     @Published private(set) var lastReadLabel: String?
+    @Published private(set) var readFrames: [String] = []
+    @Published private(set) var decodedReadValue: String?
     private var awaitingRead: String?
+    private var readDeadline: Date?
 
     /// Firmware revision read from the standard Device Information Service (0x2A26).
     @Published private(set) var fwRevision: String?
@@ -319,13 +325,47 @@ final class BLEController: NSObject, ObservableObject {
     func deleteBonds()     { sendPayload([13, 0], name: "Bluetooth-koppelingen wissen") }
 
     // MARK: Reads — response is encrypted; captured raw for decoding.
-    func readPAC() {
-        awaitingRead = "PAC"; lastReadHex = nil
-        sendPayload(LinkaCrypto.readPayload(idx: 1), name: "Lees PAC")
+    func readPAC()        { beginRead("PAC", idx: 1) }
+    func readActuations() { beginRead("Actuations", idx: 2) }
+
+    private func beginRead(_ label: String, idx: UInt8) {
+        awaitingRead = label
+        lastReadHex = nil; lastReadLabel = label
+        decodedReadValue = nil
+        readFrames = []
+        readDeadline = Date().addingTimeInterval(1.5)
+        sendPayload(LinkaCrypto.readPayload(idx: idx), name: "Lees \(label)")
+        // Close the capture window after 1.5 s and try to decode a value frame.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            guard let self, self.awaitingRead == label else { return }
+            self.awaitingRead = nil
+            self.readDeadline = nil
+            self.finishRead(label)
+        }
     }
-    func readActuations() {
-        awaitingRead = "Actuations"; lastReadHex = nil
-        sendPayload(LinkaCrypto.readPayload(idx: 2), name: "Lees actuations")
+
+    /// After the capture window, pick the frame that is NOT the ack template
+    /// and expose it. The ack is `14 02 04 .. .. 0d 11 04 00..00 1c 00 crc`.
+    private func finishRead(_ label: String) {
+        let frames = readFrames.map { $0.replacingOccurrences(of: " ", with: "") }
+        func isAck(_ h: String) -> Bool {
+            guard h.count == 40, h.hasPrefix("1402") else { return false }
+            // bytes 5..17 are a fixed template in the status ack frame
+            let mid = String(Array(h)[10..<36])
+            return mid == "0d110400000000000400001c00"
+        }
+        let value = frames.first(where: { !isAck($0) && $0.count >= 8 })
+        if let value {
+            decodedReadValue = value
+            lastReadHex = value
+            add("READ(\(label)) waarde-frame: \(value)")
+        } else if let only = frames.first {
+            lastReadHex = only
+            decodedReadValue = nil
+            add("READ(\(label)): alleen ack ontvangen (\(frames.count) frame(s)) — geen los waarde-frame.")
+        } else {
+            add("READ(\(label)): geen respons ontvangen.")
+        }
     }
 
     private func sendPayload(_ payload: [UInt8], name: String, expectActuation: Bool = false, onSuccess: (() -> Void)? = nil) {
@@ -444,10 +484,13 @@ extension BLEController: CBPeripheralDelegate {
                 add("· \(s)")
             } else {
                 if let label = awaitingRead {
-                    lastReadHex = LinkaCrypto.toHex(data)
+                    // Capture EVERY frame in the window; the value frame may be
+                    // the 2nd notification after the ack.
+                    let hex = LinkaCrypto.toHex(data)
+                    readFrames.append(hex)
+                    lastReadHex = hex
                     lastReadLabel = label
-                    awaitingRead = nil
-                    add("READ(\(label)) resp: \(LinkaCrypto.toHex(data))")
+                    add("READ(\(label)) frame \(readFrames.count): \(hex)")
                 } else {
                     add("← \(uuid.prefix(8)): \(LinkaCrypto.toHex(data))")
                 }

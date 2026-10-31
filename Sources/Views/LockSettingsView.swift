@@ -98,17 +98,29 @@ struct LockSettingsView: View {
                 Section {
                     Button { ble.readPAC() } label: { Label("Lees PAC-code", systemImage: "number.square") }
                     Button { ble.readActuations() } label: { Label("Lees actuations (totaalteller)", systemImage: "number") }
-                    if let hex = ble.lastReadHex {
+                    if let val = ble.decodedReadValue {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Antwoord (\(ble.lastReadLabel ?? "")) — ruw, versleuteld:")
+                            Text("Waarde-frame (\(ble.lastReadLabel ?? "")):")
                                 .font(.caption).foregroundStyle(.secondary)
-                            Text(hex).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
+                            Text(val).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
+                                .foregroundStyle(Theme.accent)
+                        }
+                    }
+                    if !ble.readFrames.isEmpty {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Alle frames (\(ble.readFrames.count)) — kopieer voor decodering:")
+                                .font(.caption).foregroundStyle(.secondary)
+                            ForEach(Array(ble.readFrames.enumerated()), id: \.offset) { i, f in
+                                Text("\(i + 1). \(f)")
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .textSelection(.enabled)
+                            }
                         }
                     }
                 } header: {
                     Text("Uitlezen (experimenteel)")
                 } footer: {
-                    Text("Het slot antwoordt versleuteld (statische sleutel). De ruwe respons wordt hier getoond zodat we 'm kunnen decoderen naar de echte PAC/teller.")
+                    Text("Het eerste frame is een bevestiging (ACK); de echte waarde komt soms in een tweede frame. Alle frames in ±1,5 s worden nu vastgelegd zodat we het waarde-frame kunnen vinden en decoderen.")
                 }
                 .disabled(!connected)
 
