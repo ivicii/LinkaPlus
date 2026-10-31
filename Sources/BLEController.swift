@@ -34,6 +34,9 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var lastReadLabel: String?
     private var awaitingRead: String?
 
+    /// Firmware revision read from the standard Device Information Service (0x2A26).
+    @Published private(set) var fwRevision: String?
+
     /// Parse a LINKA LockInfoPacket (byte[1] == 0x0A). Layout (little-endian):
     /// [3]=rssi(int8), [4..7]=uptime(u32), [8..9]/[10..11]/[12..13]=accel x/y/z
     /// (int16 × 6.3e-5 ≈ g), [14..15]=extra(int16).
@@ -374,7 +377,7 @@ extension BLEController: CBCentralManagerDelegate {
         }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        Task { @MainActor in state = "services"; peripheral.discoverServices([LinkaBLE.service]) }
+        Task { @MainActor in state = "services"; peripheral.discoverServices([LinkaBLE.service, CBUUID(string: "180A")]) }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
@@ -391,8 +394,11 @@ extension BLEController: CBCentralManagerDelegate {
 extension BLEController: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         Task { @MainActor in
-            for s in peripheral.services ?? [] where s.uuid == LinkaBLE.service {
-                peripheral.discoverCharacteristics(nil, for: s)
+            for s in peripheral.services ?? [] {
+                // LINKA service + standard Device Information Service (0x180A).
+                if s.uuid == LinkaBLE.service || s.uuid == CBUUID(string: "180A") {
+                    peripheral.discoverCharacteristics(nil, for: s)
+                }
             }
         }
     }
@@ -401,6 +407,8 @@ extension BLEController: CBPeripheralDelegate {
             for c in service.characteristics ?? [] {
                 if c.uuid == LinkaBLE.dataRX { write0002 = c }
                 if c.uuid.uuidString.uppercased().hasPrefix("D31E0016") { write0016 = c }
+                // Firmware Revision String (0x2A26) in the Device Information Service.
+                if c.uuid == CBUUID(string: "2A26") { peripheral.readValue(for: c) }
                 if c.properties.contains(.notify) || c.properties.contains(.indicate) {
                     peripheral.setNotifyValue(true, for: c)
                 }
@@ -415,6 +423,13 @@ extension BLEController: CBPeripheralDelegate {
         let data = [UInt8](characteristic.value ?? Data())
         let uuid = characteristic.uuid.uuidString
         Task { @MainActor in
+            // Device Information Service — firmware revision string.
+            if characteristic.uuid == CBUUID(string: "2A26") {
+                fwRevision = String(bytes: data, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                add("Firmware-revisie: \(fwRevision ?? "?")")
+                return
+            }
             // Decode live telemetry from any status/info packet (command 0x0A).
             parseInfoPacket(data)
             // The command context is the 0x12-prefixed frame (encVer 2).

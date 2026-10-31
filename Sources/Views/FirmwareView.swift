@@ -4,6 +4,7 @@ import SwiftUI
 /// download the Nordic DFU .zip to inspect it. The lock itself only accepts
 /// Nordic Secure DFU (signed) images, so this is for analysis, not reflashing.
 struct FirmwareView: View {
+    @ObservedObject var ble: BLEController
     @EnvironmentObject var session: SessionStore
     @Environment(\.dismiss) var dismiss
     private let api = APIClient()
@@ -18,10 +19,23 @@ struct FirmwareView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("Jouw slot") {
+                    row("Huidige firmware", ble.fwRevision ?? (ble.ready ? "uitlezen…" : "verbind via Bluetooth"))
+                    if let cur = ble.fwRevision, let avail = info?.leo2_firmware_version {
+                        if cur == avail {
+                            Label("Up-to-date", systemImage: "checkmark.seal.fill")
+                                .foregroundStyle(.green).font(.callout)
+                        } else {
+                            Label("Beschikbaar via app: \(avail)", systemImage: "arrow.up.circle.fill")
+                                .foregroundStyle(Theme.accent).font(.callout)
+                        }
+                    }
+                }
+
                 if loading && info == nil {
                     HStack { ProgressView(); Text("Firmware-info ophalen…").foregroundStyle(.secondary) }
                 } else if let info {
-                    Section("LEO2-firmware") {
+                    Section("LEO2-firmware (app-kanaal)") {
                         row("Versie", info.leo2_firmware_version)
                         row("Datum", info.leo2_firmware_date)
                         if let d = info.leo2_firmware_desc, !d.isEmpty {
@@ -49,7 +63,7 @@ struct FirmwareView: View {
                 }
 
                 Section {
-                    Text("De firmware is een Nordic Secure-DFU-pakket (signed). Je kunt de .zip ophalen en analyseren (uitpakken → .bin), maar het slot weigert een aangepast, niet-ondertekend image.")
+                    Text("Dit is het officiële app-kanaal (BLE-DFU). Daarnaast heeft het slot een apart cellulair OTA-kanaal (update_leo_ota_*.bin via de modem) dat alleen LINKA's cloud triggert — dat verklaart waarom er op de server nieuwere builds staan dan hier. De firmware is een Nordic Secure-DFU-pakket (signed): te analyseren, niet te wijzigen.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

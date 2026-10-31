@@ -141,7 +141,7 @@ struct LockDetailView: View {
         }
         .sheet(isPresented: $showFullMap) { fullMapSheet }
         .sheet(isPresented: $showFirmware) {
-            FirmwareView().environmentObject(session)
+            FirmwareView(ble: ble).environmentObject(session)
         }
         .sheet(isPresented: $showLockSettings) {
             LockSettingsView(ble: ble, serial: lock.serial_no)
