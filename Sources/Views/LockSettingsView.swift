@@ -131,7 +131,8 @@ struct LockSettingsView: View {
                             }
                         }
                         Button {
-                            UIPasteboard.general.string = ble.readFrames.joined(separator: "\n")
+                            let header = "\(ble.lastReadLabel ?? "Read"):"
+                            UIPasteboard.general.string = ([header] + ble.readFrames).joined(separator: "\n")
                             Haptic.tap(.light)
                             copiedFrames = true
                         } label: {
@@ -140,9 +141,9 @@ struct LockSettingsView: View {
                         }
                     }
                 } header: {
-                    Text("Uitlezen (experimenteel)")
+                    Text("Uitlezen (diagnose)")
                 } footer: {
-                    Text("Na een lezing stuurt het slot een bevestiging (ACK, 1402…) plus een statuspakket (140a…). Tik \"Kopieer alle frames\" en plak ze in de chat — dan decodeer ik de PAC/teller.")
+                    Text("De LEO geeft de PAC-code en actuations níét terug over Bluetooth — een lezing levert alleen een bevestiging (ACK, 1402…) en een statuspakket (140a…). Deze frames zijn dus voor diagnose; de ingestelde PAC onthoudt de app zelf.")
                 }
                 .disabled(!connected)
 

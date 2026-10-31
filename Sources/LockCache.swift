@@ -46,4 +46,16 @@ enum LockPrefs {
         guard let serial else { return false }
         return UserDefaults.standard.bool(forKey: "\(key)_\(serial)")
     }
+
+    /// Store the PAC the user set (the lock does not return it over BLE, so we
+    /// remember what was written, exactly like the official app does).
+    static func setPAC(_ code: Int, serial: String?) {
+        guard let serial else { return }
+        UserDefaults.standard.set(code, forKey: "pac_\(serial)")
+    }
+    static func pac(serial: String?) -> Int? {
+        guard let serial else { return nil }
+        let v = UserDefaults.standard.integer(forKey: "pac_\(serial)")
+        return v > 0 ? v : nil
+    }
 }

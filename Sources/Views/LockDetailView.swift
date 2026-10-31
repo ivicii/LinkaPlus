@@ -30,6 +30,7 @@ struct LockDetailView: View {
     @State private var showFinder = false
     @State private var movementAlarmOn = false
     @State private var pacCode = ""
+    @State private var storedPAC: Int?
     @State private var showStats = false
     @State private var showSharing = false
     @State private var showRename = false
@@ -119,6 +120,7 @@ struct LockDetailView: View {
         .navigationDestination(isPresented: $showSettings) { settingsPage }
         .task {
             movementAlarmOn = LockPrefs.movementAlarm(serial: lock.serial_no)
+            storedPAC = LockPrefs.pac(serial: lock.serial_no)
             heroLocked = ble.liveLocked ?? lock.is_locked ?? true
             loc.start()
             await startBLE()
@@ -316,15 +318,25 @@ struct LockDetailView: View {
             HStack {
                 Label("PAC-code", systemImage: "number.square")
                 Spacer()
-                TextField("4 cijfers", text: $pacCode)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 100)
+                if let p = storedPAC {
+                    Text(String(format: "%04d", p)).foregroundStyle(.secondary)
+                }
             }
-            Button {
-                if let code = Int(pacCode) { ble.setPAC(code) }
-            } label: { Label("PAC-code instellen", systemImage: "checkmark.circle") }
+            HStack {
+                TextField("nieuwe 4 cijfers", text: $pacCode)
+                    .keyboardType(.numberPad)
+                Spacer()
+                Button("Instellen") {
+                    if let code = Int(pacCode) {
+                        ble.setPAC(code)
+                        LockPrefs.setPAC(code, serial: lock.serial_no)
+                        storedPAC = code
+                        pacCode = ""
+                    }
+                }
+                .buttonStyle(.bordered)
                 .disabled(!ble.ready || pacCode.count < 4)
+            }
 
             Button { showLockSettings = true } label: {
                 Label("Alle slotinstellingen…", systemImage: "slider.horizontal.3")
@@ -332,7 +344,7 @@ struct LockDetailView: View {
         } header: {
             Text("Slotinstellingen")
         } footer: {
-            Text("Beweeg-alarm laat het slot waarschuwen bij beweging. De PAC-code is de tapcode om zonder telefoon te openen. Onder \"Alle slotinstellingen\" staan de volledige parameters (gevoeligheid, auto-lock, energie).")
+            Text("Beweeg-alarm waarschuwt bij beweging. De PAC-code is de tapcode om zonder telefoon te openen — de LEO geeft die niet terug over Bluetooth, dus de app onthoudt wat jij instelt. Onder \"Alle slotinstellingen\" staan alle parameters.")
         }
     }
 
