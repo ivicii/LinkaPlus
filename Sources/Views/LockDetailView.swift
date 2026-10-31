@@ -188,6 +188,52 @@ struct LockDetailView: View {
 
     // MARK: - Secondary sections (settings)
 
+    /// Which flags warrant a red/orange highlight (alerts & security events).
+    private func flagTint(_ f: String) -> Color {
+        if f.hasPrefix("Alarm") || f == "Sirene actief" || f == "Gekanteld"
+            || f == "Stoot gedetecteerd" || f == "Motor vastgelopen" { return Theme.danger }
+        if f == "Batterij laag" || f == "Foute PAC ingevoerd"
+            || f == "Ongeldige PAC ingesteld" || f == "Lage temperatuur" { return .orange }
+        return .secondary
+    }
+
+    @ViewBuilder
+    private var statusFlagsSection: some View {
+        if !ble.statusFlags.isEmpty {
+            Section {
+                ForEach(ble.statusFlags, id: \.self) { f in
+                    Label(f, systemImage: flagIcon(f))
+                        .foregroundStyle(flagTint(f))
+                        .font(.callout)
+                }
+            } header: {
+                Text("Slotstatus (live)")
+            } footer: {
+                Text("Live meldingen uit het slot — alarmen, opladen, foute PAC-pogingen en meer.")
+            }
+        }
+    }
+
+    private func flagIcon(_ f: String) -> String {
+        switch f {
+        case "Opladen": return "bolt.fill"
+        case "Volgeladen": return "battery.100.bolt"
+        case "Batterij laag": return "battery.25"
+        case "Sirene actief": return "speaker.wave.3.fill"
+        case "Gekanteld": return "gyroscope"
+        case "Stoot gedetecteerd", "Alarm: hameren": return "hammer.fill"
+        case "Alarm: schudden": return "waveform.path"
+        case "Motor vastgelopen": return "exclamationmark.gearshape.fill"
+        case "Aanraking": return "hand.tap.fill"
+        case "Foute PAC ingevoerd", "Ongeldige PAC ingesteld": return "lock.trianglebadge.exclamationmark"
+        case "Tracking (tether)": return "dot.radiowaves.left.and.right"
+        case "Beeper aan": return "speaker.wave.1.fill"
+        case "Lage temperatuur": return "thermometer.snowflake"
+        case "Testmodus": return "testtube.2"
+        default: return "info.circle"
+        }
+    }
+
     @ViewBuilder
     private var statusSection: some View {
         Section("Status") {
@@ -201,9 +247,10 @@ struct LockDetailView: View {
                     Label("Batterij", systemImage: batteryIcon(battery))
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text("\(battery)%" + (battery < 20 ? "  ⚠︎ laag" : "")
+                        Text("\(battery)%" + (ble.isChargingBLE ? " ⚡︎" : "")
+                             + (battery < 20 && !ble.isChargingBLE ? "  ⚠︎ laag" : "")
                              + (ble.batteryVoltageBLE != nil ? String(format: "  ·  %.2f V", ble.batteryVoltageBLE!) : ""))
-                            .foregroundStyle(battery < 20 ? .red : .secondary)
+                            .foregroundStyle(battery < 20 && !ble.isChargingBLE ? .red : .secondary)
                         Text("via \(batterySource)").font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
@@ -596,6 +643,7 @@ struct LockDetailView: View {
         List {
             // 1 — Overzicht
             statusSection
+            statusFlagsSection
             // 2 — Wat je instelt
             slotinstellingenSection
             // 3 — Waar het slot is

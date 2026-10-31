@@ -48,6 +48,32 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var batteryLevelBLE: Int?
     /// Battery voltage (V) decoded from the status frame: (byte[4]|byte[5]<<8)/1000.
     @Published private(set) var batteryVoltageBLE: Double?
+    /// Live status flags decoded from the status frame (bytes[12..15], bitfield).
+    @Published private(set) var statusFlags: [String] = []
+    @Published private(set) var isChargingBLE = false
+
+    /// Status-flag bitfield → Dutch labels. Reverse-engineered from the official
+    /// app (rc.e.b). Internal/obvious bits are intentionally not surfaced.
+    private static let flagLabels: [(UInt32, String)] = [
+        (0x000002, "Tracking (tether)"),
+        (0x000004, "Opladen"),
+        (0x000008, "Volgeladen"),
+        (0x000010, "Batterij laag"),
+        (0x000020, "Motor vastgelopen"),
+        (0x000040, "Stoot gedetecteerd"),
+        (0x000080, "Aanraking"),
+        (0x000100, "Alarm"),
+        (0x000200, "Gekanteld"),
+        (0x001000, "Testmodus"),
+        (0x004000, "Hall-sensor afwijking"),
+        (0x008000, "Alarm: hameren"),
+        (0x010000, "Alarm: schudden"),
+        (0x020000, "Sirene actief"),
+        (0x040000, "Ongeldige PAC ingesteld"),
+        (0x080000, "Foute PAC ingevoerd"),
+        (0x100000, "Beeper aan"),
+        (0x400000, "Lage temperatuur"),
+    ]
 
     /// Parse a LINKA LockInfoPacket (byte[1] == 0x0A). Layout (little-endian):
     /// [3]=rssi(int8), [4..7]=uptime(u32), [8..9]/[10..11]/[12..13]=accel x/y/z
@@ -62,6 +88,12 @@ final class BLEController: NSObject, ObservableObject {
         let mv = Int(d[4]) | (Int(d[5]) << 8)
         let v = Double(mv) / 1000.0
         if v > 1.0 && v < 6.0 { batteryVoltageBLE = v }
+        // Status flags bitfield at bytes[12..15] (little-endian).
+        if d.count >= 16 {
+            let flags = UInt32(d[12]) | (UInt32(d[13]) << 8) | (UInt32(d[14]) << 16) | (UInt32(d[15]) << 24)
+            statusFlags = Self.flagLabels.filter { flags & $0.0 != 0 }.map { $0.1 }
+            isChargingBLE = (flags & 0x04) != 0 || (flags & 0x08) != 0
+        }
     }
 
     private func parseInfoPacket(_ d: [UInt8]) {
