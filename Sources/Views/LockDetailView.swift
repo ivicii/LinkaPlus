@@ -121,6 +121,7 @@ struct LockDetailView: View {
         }
         .navigationDestination(isPresented: $showSettings) { settingsPage }
         .task {
+            LockNotifier.shared.requestAuth()
             movementAlarmOn = LockPrefs.movementAlarm(serial: lock.serial_no)
             storedPAC = LockPrefs.pac(serial: lock.serial_no)
             heroLocked = ble.liveLocked ?? lock.is_locked ?? true
@@ -242,6 +243,9 @@ struct LockDetailView: View {
                 value: statusText,
                 systemImage: statusIcon
             )
+            if let ls = ble.lockStateText {
+                statusRow("Slotstand (uit slot)", value: ls, systemImage: "lock.square")
+            }
             if let battery = latestBattery {
                 HStack {
                     Label("Batterij", systemImage: batteryIcon(battery))

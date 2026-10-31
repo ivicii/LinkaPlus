@@ -51,6 +51,21 @@ final class BLEController: NSObject, ObservableObject {
     /// Live status flags decoded from the status frame (bytes[12..15], bitfield).
     @Published private(set) var statusFlags: [String] = []
     @Published private(set) var isChargingBLE = false
+    /// Lock state read from the status frame (byte[2]); nil until a frame arrives.
+    @Published private(set) var lockStateText: String?
+    private var prevFlagSet: Set<String> = []
+
+    /// Flags that warrant a push notification, with their notification text.
+    private static let notifyFlags: [String: (String, String)] = [
+        "Foute PAC ingevoerd":     ("Beveiliging", "Er is een foute PAC-code op je slot ingevoerd."),
+        "Ongeldige PAC ingesteld": ("Beveiliging", "Er is een ongeldige PAC-code ingesteld."),
+        "Sirene actief":           ("Alarm", "De sirene van je slot gaat af."),
+        "Alarm":                   ("Alarm", "Je slot slaat alarm."),
+        "Alarm: hameren":          ("Alarm", "Je slot detecteert hameren (inbraakpoging?)."),
+        "Alarm: schudden":         ("Alarm", "Je slot wordt geschud."),
+        "Motor vastgelopen":       ("Slot", "De motor van je slot is vastgelopen."),
+        "Batterij laag":           ("Batterij", "De batterij van je slot is bijna leeg."),
+    ]
 
     /// Status-flag bitfield → Dutch labels. Reverse-engineered from the official
     /// app (rc.e.b). Internal/obvious bits are intentionally not surfaced.
@@ -88,11 +103,30 @@ final class BLEController: NSObject, ObservableObject {
         let mv = Int(d[4]) | (Int(d[5]) << 8)
         let v = Double(mv) / 1000.0
         if v > 1.0 && v < 6.0 { batteryVoltageBLE = v }
+        // Lock state (byte[2]): 3/5 = locked, 4/6 = unlocked, 1/2 = in transit.
+        switch Int(d[2]) {
+        case 1: lockStateText = "Vergrendelen…"
+        case 2: lockStateText = "Ontgrendelen…"
+        case 3: lockStateText = "Vergrendeld";   if liveLocked == nil { liveLocked = true }
+        case 4: lockStateText = "Ontgrendeld";   if liveLocked == nil { liveLocked = false }
+        case 5: lockStateText = "Vergrendeld (PAC)"; if liveLocked == nil { liveLocked = true }
+        case 6: lockStateText = "Ontgrendeld (PAC)"; if liveLocked == nil { liveLocked = false }
+        default: break
+        }
         // Status flags bitfield at bytes[12..15] (little-endian).
         if d.count >= 16 {
             let flags = UInt32(d[12]) | (UInt32(d[13]) << 8) | (UInt32(d[14]) << 16) | (UInt32(d[15]) << 24)
-            statusFlags = Self.flagLabels.filter { flags & $0.0 != 0 }.map { $0.1 }
+            let active = Self.flagLabels.filter { flags & $0.0 != 0 }.map { $0.1 }
+            statusFlags = active
             isChargingBLE = (flags & 0x04) != 0 || (flags & 0x08) != 0
+            // Notify on the rising edge of any critical flag.
+            let now = Set(active)
+            for flag in now.subtracting(prevFlagSet) {
+                if let (title, body) = Self.notifyFlags[flag] {
+                    LockNotifier.shared.notify(title: title, body: body, id: flag)
+                }
+            }
+            prevFlagSet = now
         }
     }
 
