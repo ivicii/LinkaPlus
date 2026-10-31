@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Full lock-settings screen. Parameter indices reverse-engineered from the
 /// official app's LockController (confirmed against the working 106/5 = movement
@@ -31,6 +32,15 @@ struct LockSettingsView: View {
 
     @State private var showDefaultConfirm = false
     @State private var showBondsConfirm = false
+    @State private var copiedFrames = false
+
+    private func frameLabel(_ hex: String) -> String {
+        let h = hex.lowercased()
+        if h.hasPrefix("1402") { return "ACK / bevestiging" }
+        if h.hasPrefix("140a") { return "Statuspakket (0x0A)" }
+        if h.hasPrefix("1412") || h.hasPrefix("12")  { return "Context (teller)" }
+        return "Onbekend frame"
+    }
 
     private var connected: Bool { ble.ready }
 
@@ -108,29 +118,31 @@ struct LockSettingsView: View {
                 Section {
                     Button { ble.readPAC() } label: { Label("Lees PAC-code", systemImage: "number.square") }
                     Button { ble.readActuations() } label: { Label("Lees actuations (totaalteller)", systemImage: "number") }
-                    if let val = ble.decodedReadValue {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Waarde-frame (\(ble.lastReadLabel ?? "")):")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Text(val).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
-                                .foregroundStyle(Theme.accent)
-                        }
-                    }
-                    if !ble.readFrames.isEmpty {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Alle frames (\(ble.readFrames.count)) — kopieer voor decodering:")
-                                .font(.caption).foregroundStyle(.secondary)
-                            ForEach(Array(ble.readFrames.enumerated()), id: \.offset) { i, f in
-                                Text("\(i + 1). \(f)")
+                    if ble.readFrames.isEmpty {
+                        Text("Nog geen frames. Tik op een leesknop.").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(ble.readFrames.enumerated()), id: \.offset) { i, f in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(i + 1) · \(frameLabel(f))")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                Text(f)
                                     .font(.system(.caption2, design: .monospaced))
                                     .textSelection(.enabled)
                             }
+                        }
+                        Button {
+                            UIPasteboard.general.string = ble.readFrames.joined(separator: "\n")
+                            Haptic.tap(.light)
+                            copiedFrames = true
+                        } label: {
+                            Label(copiedFrames ? "Gekopieerd ✓" : "Kopieer alle frames",
+                                  systemImage: copiedFrames ? "checkmark" : "doc.on.doc")
                         }
                     }
                 } header: {
                     Text("Uitlezen (experimenteel)")
                 } footer: {
-                    Text("Het eerste frame is een bevestiging (ACK); de echte waarde komt soms in een tweede frame. Alle frames in ±1,5 s worden nu vastgelegd zodat we het waarde-frame kunnen vinden en decoderen.")
+                    Text("Na een lezing stuurt het slot een bevestiging (ACK, 1402…) plus een statuspakket (140a…). Tik \"Kopieer alle frames\" en plak ze in de chat — dan decodeer ik de PAC/teller.")
                 }
                 .disabled(!connected)
 
@@ -181,6 +193,7 @@ struct LockSettingsView: View {
             } message: {
                 Text("Dit verwijdert alle Bluetooth-koppelingen van het slot. Je moet daarna opnieuw verbinden.")
             }
+            .onChange(of: ble.readFrames.count) { _ in copiedFrames = false }
             .onAppear {
                 autoLock = LockPrefs.bool("autoLock", serial: serial)
                 quickLock = LockPrefs.bool("quickLock", serial: serial)

@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import UIKit
 
 struct LockDetailView: View {
     let lock: Lock
@@ -482,6 +483,12 @@ struct LockDetailView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Ruw statuspakket (voor kalibratie)").font(.caption).foregroundStyle(.secondary)
                     Text(raw).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
+                }
+                Button {
+                    UIPasteboard.general.string = raw
+                    Haptic.tap(.light)
+                } label: {
+                    Label("Kopieer ruwe hex", systemImage: "doc.on.doc")
                 }
             }
             if ble.infoAt == nil {
