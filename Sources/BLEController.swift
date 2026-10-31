@@ -38,7 +38,6 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var readFrames: [String] = []
     @Published private(set) var decodedReadValue: String?
     private var awaitingRead: String?
-    private var readDeadline: Date?
 
     /// Firmware revision read from the standard Device Information Service (0x2A26).
     @Published private(set) var fwRevision: String?
@@ -328,18 +327,18 @@ final class BLEController: NSObject, ObservableObject {
     func readPAC()        { beginRead("PAC", idx: 1) }
     func readActuations() { beginRead("Actuations", idx: 2) }
 
-    private func beginRead(_ label: String, idx: UInt8) {
+    private func beginRead(_ label: String, idx: Int) {
         awaitingRead = label
         lastReadHex = nil; lastReadLabel = label
         decodedReadValue = nil
         readFrames = []
         readDeadline = Date().addingTimeInterval(1.5)
         sendPayload(LinkaCrypto.readPayload(idx: idx), name: "Lees \(label)")
-        // Close the capture window after 1.5 s and try to decode a value frame.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+        // Close the capture window after ~1.5 s and try to decode a value frame.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
             guard let self, self.awaitingRead == label else { return }
             self.awaitingRead = nil
-            self.readDeadline = nil
             self.finishRead(label)
         }
     }
