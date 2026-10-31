@@ -76,9 +76,11 @@ struct LockDetailView: View {
     /// When the lock's GPS location was last updated (location_update_time).
     private var lastLocationDate: Date? { DateUtils.parseAny(lock.modifiedAt) }
 
+    /// Prefer the live BLE battery (works without cloud); fall back to cloud.
     private var latestBattery: Int? {
-        activities.compactMap { $0.batteryPercent }.first { $0 > 0 }
+        ble.batteryLevelBLE ?? activities.compactMap { $0.batteryPercent }.first { $0 > 0 }
     }
+    private var batterySource: String { ble.batteryLevelBLE != nil ? "Bluetooth" : "cloud" }
 
     /// Best known coordinate: the lock's own, else the most recent located activity.
     private var coordinate: CLLocationCoordinate2D? {
@@ -198,8 +200,12 @@ struct LockDetailView: View {
                 HStack {
                     Label("Batterij", systemImage: batteryIcon(battery))
                     Spacer()
-                    Text("\(battery)%" + (battery < 20 ? "  ⚠︎ laag" : ""))
-                        .foregroundStyle(battery < 20 ? .red : .secondary)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("\(battery)%" + (battery < 20 ? "  ⚠︎ laag" : "")
+                             + (ble.batteryVoltageBLE != nil ? String(format: "  ·  %.2f V", ble.batteryVoltageBLE!) : ""))
+                            .foregroundStyle(battery < 20 ? .red : .secondary)
+                        Text("via \(batterySource)").font(.caption2).foregroundStyle(.tertiary)
+                    }
                 }
             }
             if let distanceText {
@@ -488,6 +494,9 @@ struct LockDetailView: View {
             if let r = ble.infoRSSIpkt {
                 statusRow("Signaal (pakket)", value: "\(r) dBm", systemImage: "antenna.radiowaves.left.and.right")
             }
+            if let v = ble.batteryVoltageBLE {
+                statusRow("Accuspanning", value: String(format: "%.2f V", v), systemImage: "bolt.fill")
+            }
             if let t = ble.infoTempC {
                 statusRow("Temperatuur (≈)", value: "\(t) °C", systemImage: "thermometer.medium")
             }
@@ -514,7 +523,7 @@ struct LockDetailView: View {
         } header: {
             Text("Sensoren (live)")
         } footer: {
-            Text("Live uit het slot. Kanteling/accel, uptime en signaal zijn geijkt. Temperatuur (≈°C) komt uit byte 17 — hou het slot even warm/koud en controleer of 't meebeweegt. Accu-spanning zit níét in dit pakket; batterij-% komt uit de cloud (Statistieken).")
+            Text("Live uit het slot via Bluetooth — werkt zonder cloud. Accuspanning en batterij-% komen uit het statusframe (gedecodeerd uit de officiële app: spanning = bytes 4-5/1000, batterij = byte 6). Verschijnen kort na verbinden (automatische state-ping).")
         }
     }
 

@@ -42,10 +42,28 @@ final class BLEController: NSObject, ObservableObject {
 
     /// Firmware revision read from the standard Device Information Service (0x2A26).
     @Published private(set) var fwRevision: String?
+    /// Battery level (%) — from the lock's status frame (byte[6]), which matches
+    /// the official app, or the standard Battery Service as a fallback. Works
+    /// without the cloud.
+    @Published private(set) var batteryLevelBLE: Int?
+    /// Battery voltage (V) decoded from the status frame: (byte[4]|byte[5]<<8)/1000.
+    @Published private(set) var batteryVoltageBLE: Double?
 
     /// Parse a LINKA LockInfoPacket (byte[1] == 0x0A). Layout (little-endian):
     /// [3]=rssi(int8), [4..7]=uptime(u32), [8..9]/[10..11]/[12..13]=accel x/y/z
     /// (int16 × 6.3e-5 ≈ g), [14..15]=extra(int16).
+    /// Decode battery % and cell voltage from a status frame (type byte [1]==0x02).
+    /// Field layout reverse-engineered from the official app (pc.f / pc.j):
+    /// byte[6] = battery %, (byte[4]|byte[5]<<8)/1000 = voltage (V).
+    private func parseStatusFrame(_ d: [UInt8]) {
+        guard d.count >= 7, d[0] == 0x14, d[1] == 0x02 else { return }
+        let pct = Int(d[6])
+        if pct >= 0 && pct <= 100 { batteryLevelBLE = pct }
+        let mv = Int(d[4]) | (Int(d[5]) << 8)
+        let v = Double(mv) / 1000.0
+        if v > 1.0 && v < 6.0 { batteryVoltageBLE = v }
+    }
+
     private func parseInfoPacket(_ d: [UInt8]) {
         guard d.count >= 16, d[1] == 0x0A else { return }
         func le16(_ i: Int) -> Int {
@@ -96,6 +114,7 @@ final class BLEController: NSObject, ObservableObject {
     /// 0 = D31E0002 (legacy), 1 = D31E0016 (newer V2 channel).
     var channel = 0
     var counterOffset = 0
+    private var didInitialStatusPing = false
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -419,11 +438,12 @@ extension BLEController: CBCentralManagerDelegate {
         }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        Task { @MainActor in state = "services"; peripheral.discoverServices([LinkaBLE.service, CBUUID(string: "180A")]) }
+        Task { @MainActor in state = "services"; peripheral.discoverServices([LinkaBLE.service, CBUUID(string: "180A"), CBUUID(string: "180F")]) }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
             ready = false; state = "verbroken"; add("Verbinding verbroken.")
+            didInitialStatusPing = false
             // Auto-reconnect unless the user intentionally stopped.
             if !intentionalStop, subkey.count == 16, mac.count == 6 {
                 try? await Task.sleep(nanoseconds: 600_000_000)
@@ -437,8 +457,10 @@ extension BLEController: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         Task { @MainActor in
             for s in peripheral.services ?? [] {
-                // LINKA service + standard Device Information Service (0x180A).
-                if s.uuid == LinkaBLE.service || s.uuid == CBUUID(string: "180A") {
+                // LINKA service + standard Device Info (0x180A) + Battery (0x180F).
+                if s.uuid == LinkaBLE.service
+                    || s.uuid == CBUUID(string: "180A")
+                    || s.uuid == CBUUID(string: "180F") {
                     peripheral.discoverCharacteristics(nil, for: s)
                 }
             }
@@ -451,6 +473,11 @@ extension BLEController: CBPeripheralDelegate {
                 if c.uuid.uuidString.uppercased().hasPrefix("D31E0016") { write0016 = c }
                 // Firmware Revision String (0x2A26) in the Device Information Service.
                 if c.uuid == CBUUID(string: "2A26") { peripheral.readValue(for: c) }
+                // Standard Battery Level (0x2A19) — read once + subscribe if possible.
+                if c.uuid == CBUUID(string: "2A19") {
+                    peripheral.readValue(for: c)
+                    add("Battery Service (0x2A19) gevonden — lokaal batterij uitlezen.")
+                }
                 if c.properties.contains(.notify) || c.properties.contains(.indicate) {
                     peripheral.setNotifyValue(true, for: c)
                 }
@@ -472,13 +499,25 @@ extension BLEController: CBPeripheralDelegate {
                 add("Firmware-revisie: \(fwRevision ?? "?")")
                 return
             }
-            // Decode live telemetry from any status/info packet (command 0x0A).
+            // Standard Battery Level (0x2A19): single byte 0–100 %.
+            if characteristic.uuid == CBUUID(string: "2A19") {
+                if let b = data.first { batteryLevelBLE = Int(b); add("Batterij (BLE): \(b)%") }
+                return
+            }
+            // Decode live telemetry: 0x0A motion/info packet, 0x02 status frame.
             parseInfoPacket(data)
+            parseStatusFrame(data)
             // The command context is the 0x12-prefixed frame (encVer 2).
             if data.count >= 7, data[0] == 0x12 {
                 ctxEncVer = Int(data[2])
                 ctxCounter = UInt32(data[3]) | (UInt32(data[4]) << 8) | (UInt32(data[5]) << 16) | (UInt32(data[6]) << 24)
                 add("CONTEXT: encVer \(ctxEncVer!), teller \(ctxCounter!)  [\(LinkaCrypto.toHex(data))]")
+                // Once we have the context counter, ask for a status frame so
+                // battery % and voltage populate automatically (once per connect).
+                if !didInitialStatusPing {
+                    didInitialStatusPing = true
+                    Task { try? await Task.sleep(nanoseconds: 400_000_000); statePing() }
+                }
             } else if characteristic.uuid == LinkaBLE.leoLog {
                 // D31E0014 firmware debug log (ASCII) — the reliable signal.
                 let s = String(bytes: data, encoding: .utf8) ?? LinkaCrypto.toHex(data)
