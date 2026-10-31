@@ -70,37 +70,37 @@ struct LockSettingsView: View {
                 .disabled(!connected)
 
                 Section {
-                    numeric("Bump-gevoeligheid", value: $bump, range: 1...20, icon: "waveform.path") { ble.setBumpThreshold($0) }
-                    numeric("Stall-delay", value: $stall, range: 0...30, icon: "hourglass") { ble.setStall($0) }
-                    numeric("Alarm-delay", value: $alarmDelay, range: 0...60, icon: "timer") { ble.setAlarmDelay($0) }
-                    numeric("Alarm-tijd", value: $alarmTime, range: 0...255, icon: "alarm") { ble.setAlarmTime($0) }
+                    numeric("Bump-drempel (mg)", value: $bump, range: 0...255, icon: "waveform.path") { ble.setBumpThreshold($0) }
+                    numeric("Stall-vertraging (×100 ms)", value: $stall, range: 0...50, icon: "hourglass") { ble.setStall($0) }
+                    numeric("Alarm-vertraging (s)", value: $alarmDelay, range: 0...60, icon: "timer") { ble.setAlarmDelay($0) }
+                    numeric("Alarm-duur (s)", value: $alarmTime, range: 0...255, icon: "alarm") { ble.setAlarmTime($0) }
                 } header: {
                     Text("Alarm & gevoeligheid")
                 } footer: {
-                    Text("Eenheden zijn niet officieel gedocumenteerd — stel in en kijk naar het gedrag van je slot. De waarde wordt pas geschreven als je op ‘Schrijf’ tikt.")
+                    Text("Eenheden uit de officiële app: bump-drempel in mg (milli-g, lager = gevoeliger), stall-vertraging in stappen van 100 ms, alarm-vertraging en -duur in seconden. De waarde wordt pas geschreven als je op ‘Schrijf’ tikt.")
                 }
                 .disabled(!connected)
 
                 Section {
-                    numeric("Roll-hoek (zijwaarts)", value: $rollAngle, range: 0...90, icon: "rotate.3d") { ble.setRollAngle($0) }
-                    numeric("Tilt-hoek (voor/achter)", value: $tiltAngle, range: 0...90, icon: "gyroscope") { ble.setTiltAngle($0) }
-                    numeric("Jostle (schudgevoeligheid)", value: $jostle, range: 0...30, icon: "waveform") { ble.setJostle($0) }
+                    numeric("Roll-alarm (°, zijwaarts)", value: $rollAngle, range: 0...90, icon: "rotate.3d") { ble.setRollAngle($0) }
+                    numeric("Pitch-alarm (°, voor/achter)", value: $tiltAngle, range: 0...90, icon: "gyroscope") { ble.setTiltAngle($0) }
+                    numeric("Jostle (×100 ms)", value: $jostle, range: 0...50, icon: "waveform") { ble.setJostle($0) }
                     numeric("Accel data-rate", value: $accelRate, range: 0...10, icon: "speedometer") { ble.setAccelDataRate($0) }
-                    numeric("Pulse-tap", value: $pulseTap, range: 0...10, icon: "hand.tap") { ble.setPulseTap($0) }
+                    numeric("Pulse-drempel (mg)", value: $pulseTap, range: 0...255, icon: "hand.tap") { ble.setPulseTap($0) }
                 } header: {
                     Text("Kanteling-alarm & gevoeligheid")
                 } footer: {
-                    Text("Hoek in graden waarbij het alarm afgaat als de fiets kantelt (roll = zijwaarts, tilt = voor/achter). Accel-datarate en pulse-tap regelen hoe fijn de sensor meet.")
+                    Text("Eenheden uit de officiële app: roll/pitch-alarm in graden (hoek waarbij het alarm afgaat), jostle-venster in stappen van 100 ms, bump/pulse-drempel in mg. Accel-datarate regelt hoe vaak de sensor meet.")
                 }
                 .disabled(!connected)
 
                 Section {
-                    numeric("Lock-sleep", value: $lockSleep, range: 0...255, icon: "moon.zzz") { ble.setLockSleep($0) }
-                    numeric("Unlock-sleep", value: $unlockSleep, range: 0...255, icon: "moon") { ble.setUnlockSleep($0) }
+                    numeric("Lock-sleep (s)", value: $lockSleep, range: 0...255, icon: "moon.zzz") { ble.setLockSleep($0) }
+                    numeric("Unlock-sleep (s)", value: $unlockSleep, range: 0...255, icon: "moon") { ble.setUnlockSleep($0) }
                 } header: {
                     Text("Energie (sleep)")
                 } footer: {
-                    Text("Hoe lang het slot wacht voor het in slaapstand gaat. Langer = sneller reageren, meer batterijverbruik.")
+                    Text("In seconden (uit de officiële app). Hoe lang het slot wacht voor het in slaapstand gaat — langer = sneller reageren, meer batterijverbruik.")
                 }
                 .disabled(!connected)
 
