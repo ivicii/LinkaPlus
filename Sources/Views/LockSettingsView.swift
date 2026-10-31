@@ -19,6 +19,9 @@ struct LockSettingsView: View {
     @State private var alarmTime = 30
     @State private var lockSleep = 30
     @State private var unlockSleep = 30
+    @State private var rollAngle = 45
+    @State private var tiltAngle = 45
+    @State private var jostle = 5
 
     // Advanced raw write
     @State private var rawIdx = ""
@@ -64,6 +67,17 @@ struct LockSettingsView: View {
                 .disabled(!connected)
 
                 Section {
+                    numeric("Roll-hoek (zijwaarts)", value: $rollAngle, range: 0...90, icon: "rotate.3d") { ble.setRollAngle($0) }
+                    numeric("Tilt-hoek (voor/achter)", value: $tiltAngle, range: 0...90, icon: "gyroscope") { ble.setTiltAngle($0) }
+                    numeric("Jostle (schudgevoeligheid)", value: $jostle, range: 0...30, icon: "waveform") { ble.setJostle($0) }
+                } header: {
+                    Text("Kanteling-alarm (hoeken)")
+                } footer: {
+                    Text("Hoek in graden waarbij het alarm afgaat als de fiets kantelt. Roll = zijwaarts, Tilt = voor/achter.")
+                }
+                .disabled(!connected)
+
+                Section {
                     numeric("Lock-sleep", value: $lockSleep, range: 0...255, icon: "moon.zzz") { ble.setLockSleep($0) }
                     numeric("Unlock-sleep", value: $unlockSleep, range: 0...255, icon: "moon") { ble.setUnlockSleep($0) }
                 } header: {
@@ -87,7 +101,7 @@ struct LockSettingsView: View {
                 } header: {
                     Text("Parameter schrijven (geavanceerd)")
                 } footer: {
-                    Text("Schrijf elke parameter-index + waarde rechtstreeks. Bekend: 1=PAC, 5=stall, 7=alarm-delay, 10=bump, 12=audio, 17=lock-sleep, 30/50=unlock-sleep, 37=alarm-tijd, 55=quick-lock, 102=auto-lock, 106=beweeg-alarm. ⚠︎ Onbekende indexen/waarden op eigen risico.")
+                    Text("Schrijf elke parameter-index + waarde rechtstreeks. Bekend: 1=PAC, 5=stall, 7=alarm-delay, 10=bump, 12=audio, 13=pulse-tap, 14=jostle, 16=accel-rate, 17=lock-sleep, 28=roll-hoek, 29=tilt-hoek, 30/50=unlock-sleep, 37=alarm-tijd, 55=quick-lock, 102=auto-lock, 106=beweeg-alarm. ⚠︎ Onbekende indexen/waarden op eigen risico.")
                 }
                 .disabled(!connected)
             }

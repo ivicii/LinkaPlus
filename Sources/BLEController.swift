@@ -255,6 +255,15 @@ final class BLEController: NSObject, ObservableObject {
     func setStall(_ v: Int) {
         sendPayload(LinkaCrypto.settingPayload(idx: 5, value: v), name: "Stall-delay \(v)")
     }
+    func setRollAngle(_ v: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 28, value: v), name: "Roll-hoek \(v)°")
+    }
+    func setTiltAngle(_ v: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 29, value: v), name: "Tilt-hoek \(v)°")
+    }
+    func setJostle(_ v: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 14, value: v), name: "Jostle \(v)")
+    }
     func setAlarmDelay(_ v: Int) {
         sendPayload(LinkaCrypto.settingPayload(idx: 7, value: v), name: "Alarm-delay \(v)")
     }
