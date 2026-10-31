@@ -35,6 +35,7 @@ struct StatsView: View {
 
     @State private var gran: Gran = .dag
     @State private var selected: Date?
+    @State private var showActivityList = false
 
     private struct Bucket: Identifiable { let date: Date; let count: Int; var id: Date { date } }
     private struct BatteryPoint: Identifiable { let date: Date; let pct: Int; var id: Date { date } }
@@ -129,7 +130,20 @@ struct StatsView: View {
             .navigationTitle("Statistieken")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Sluit") { dismiss() } } }
+            .navigationDestination(isPresented: $showActivityList) { activityListView }
         }
+    }
+
+    private var activityListView: some View {
+        List {
+            if activities.isEmpty {
+                Text("Nog geen activiteiten.").foregroundStyle(.secondary)
+            } else {
+                ForEach(activities) { ActivityRow(activity: $0) }
+            }
+        }
+        .navigationTitle("Activiteiten")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: Sections
@@ -137,7 +151,10 @@ struct StatsView: View {
     private var tilesSection: some View {
         Section {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                tile("Activiteiten", "\(activities.count)", "list.bullet", .blue)
+                Button { Haptic.tap(.light); showActivityList = true } label: {
+                    tile("Activiteiten", "\(activities.count)", "list.bullet", .blue, tappable: true)
+                }
+                .buttonStyle(.plain)
                 tile("Batterij", currentBattery.map { "\($0)%" } ?? "–", "battery.100",
                      (currentBattery ?? 100) < 20 ? .red : Theme.locked)
                 tile("Geopend", "\(opens)", "lock.open", Theme.open)
@@ -250,10 +267,19 @@ struct StatsView: View {
         }
     }
 
-    private func tile(_ title: String, _ value: String, _ icon: String, _ color: Color) -> some View {
+    private func tile(_ title: String, _ value: String, _ icon: String, _ color: Color,
+                      tappable: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: icon).foregroundStyle(color)
-            Text(value).font(.title2.bold())
+            HStack {
+                Image(systemName: icon).foregroundStyle(color)
+                Spacer()
+                if tappable {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(value).font(.title2.bold()).foregroundStyle(.primary)
             Text(title).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

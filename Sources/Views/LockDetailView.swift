@@ -405,17 +405,20 @@ struct LockDetailView: View {
 
     @ViewBuilder
     private var activiteitenSection: some View {
-        Section("Activiteiten") {
+        Section {
             Button { showStats = true } label: {
-                Label("Statistieken", systemImage: "chart.bar.fill")
+                HStack {
+                    Label("Statistieken & activiteiten", systemImage: "chart.bar.fill")
+                    Spacer()
+                    if busy && activities.isEmpty {
+                        ProgressView()
+                    } else {
+                        Text("\(activities.count)").foregroundStyle(.secondary)
+                    }
+                }
             }
-            if busy && activities.isEmpty {
-                HStack { ProgressView(); Text("Laden…").foregroundStyle(.secondary) }
-            } else if activities.isEmpty {
-                Text(error ?? "Nog geen activiteiten.").foregroundStyle(.secondary)
-            } else {
-                ForEach(activities) { ActivityRow(activity: $0) }
-            }
+        } footer: {
+            Text("Grafieken, open/dicht-tellers en de volledige activiteitenlijst (tik op de tegel \"Activiteiten\").")
         }
     }
 
