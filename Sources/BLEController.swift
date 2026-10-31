@@ -360,6 +360,10 @@ final class BLEController: NSObject, ObservableObject {
         sendPayload(LinkaCrypto.settingPayload(idx: 55, value: on ? 1 : 0),
                     name: on ? "Quick-lock aan" : "Quick-lock uit")
     }
+    func setAudio(_ on: Bool) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 12, value: on ? 1 : 0),
+                    name: on ? "Geluid aan" : "Geluid uit")
+    }
     func setBumpThreshold(_ v: Int) {
         sendPayload(LinkaCrypto.settingPayload(idx: 10, value: v), name: "Bump-gevoeligheid \(v)")
     }

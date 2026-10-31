@@ -12,6 +12,7 @@ struct LockSettingsView: View {
     // On/off settings (remembered per lock)
     @State private var autoLock = false
     @State private var quickLock = false
+    @State private var audioOn = false
 
     // Numeric settings (value sent on "Schrijf")
     @State private var bump = 5
@@ -66,6 +67,10 @@ struct LockSettingsView: View {
                         get: { quickLock },
                         set: { v in quickLock = v; LockPrefs.setBool(v, key: "quickLock", serial: serial); if connected { ble.setQuickLock(v) } }
                     )) { Label("Quick-lock", systemImage: "bolt.horizontal") }
+                    Toggle(isOn: Binding(
+                        get: { audioOn },
+                        set: { v in audioOn = v; LockPrefs.setBool(v, key: "audio", serial: serial); if connected { ble.setAudio(v) } }
+                    )) { Label("Geluid / pieptonen", systemImage: "speaker.wave.2") }
                 }
                 .disabled(!connected)
 
@@ -198,6 +203,7 @@ struct LockSettingsView: View {
             .onAppear {
                 autoLock = LockPrefs.bool("autoLock", serial: serial)
                 quickLock = LockPrefs.bool("quickLock", serial: serial)
+                audioOn = LockPrefs.bool("audio", serial: serial)
             }
         }
     }
