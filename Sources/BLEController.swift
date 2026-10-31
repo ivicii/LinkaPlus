@@ -26,6 +26,7 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var infoRSSIpkt: Int?
     @Published private(set) var accelG: SIMD3<Double>?
     @Published private(set) var infoExtra: Int?
+    @Published private(set) var infoTempC: Int?
     @Published private(set) var infoRaw: String?
     @Published private(set) var infoAt: Date?
 
@@ -59,6 +60,9 @@ final class BLEController: NSObject, ObservableObject {
         let s = 6.3e-5
         accelG = SIMD3(Double(le16(8)) * s, Double(le16(10)) * s, Double(le16(12)) * s)
         infoExtra = le16(14)
+        // Byte[17] tracks a small value (19–21) independent of battery/uptime —
+        // consistent with temperature in °C. Shown as an estimate until confirmed.
+        if d.count >= 18 { infoTempC = Int(d[17]) }
         infoRaw = LinkaCrypto.toHex(d)
         infoAt = Date()
     }

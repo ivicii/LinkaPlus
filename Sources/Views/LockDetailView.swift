@@ -488,6 +488,9 @@ struct LockDetailView: View {
             if let r = ble.infoRSSIpkt {
                 statusRow("Signaal (pakket)", value: "\(r) dBm", systemImage: "antenna.radiowaves.left.and.right")
             }
+            if let t = ble.infoTempC {
+                statusRow("Temperatuur (≈)", value: "\(t) °C", systemImage: "thermometer.medium")
+            }
             if let e = ble.infoExtra {
                 statusRow("Extra (ongelabeld)", value: "\(e)", systemImage: "number")
             }
@@ -511,7 +514,7 @@ struct LockDetailView: View {
         } header: {
             Text("Sensoren (live)")
         } footer: {
-            Text("Live uit het slot. Kanteling/accel, uptime en signaal zijn geijkt. Voltage en temperatuur zitten in een ander pakket — deel de ruwe hex hierboven, dan maak ik er accu-spanning en °C van.")
+            Text("Live uit het slot. Kanteling/accel, uptime en signaal zijn geijkt. Temperatuur (≈°C) komt uit byte 17 — hou het slot even warm/koud en controleer of 't meebeweegt. Accu-spanning zit níét in dit pakket; batterij-% komt uit de cloud (Statistieken).")
         }
     }
 
