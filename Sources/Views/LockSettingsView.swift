@@ -85,6 +85,16 @@ struct LockSettingsView: View {
                 .disabled(!connected)
 
                 Section {
+                    numeric("Lock-sleep", value: $lockSleep, range: 0...255, icon: "moon.zzz") { ble.setLockSleep($0) }
+                    numeric("Unlock-sleep", value: $unlockSleep, range: 0...255, icon: "moon") { ble.setUnlockSleep($0) }
+                } header: {
+                    Text("Energie (sleep)")
+                } footer: {
+                    Text("Hoe lang het slot wacht voor het in slaapstand gaat. Langer = sneller reageren, meer batterijverbruik.")
+                }
+                .disabled(!connected)
+
+                Section {
                     Button { ble.statePing() } label: { Label("State-ping (status opvragen)", systemImage: "dot.radiowaves.up.forward") }
                     Button { ble.reboot() } label: { Label("Herstart slot", systemImage: "arrow.clockwise.circle") }
                     Button { ble.sleepLock() } label: { Label("Slaapstand", systemImage: "moon.zzz") }
@@ -125,30 +135,6 @@ struct LockSettingsView: View {
                 .disabled(!connected)
 
                 Section {
-                    Button(role: .destructive) { showDefaultConfirm = true } label: {
-                        Label("Standaardinstellingen herstellen", systemImage: "arrow.counterclockwise")
-                    }
-                    Button(role: .destructive) { showBondsConfirm = true } label: {
-                        Label("Bluetooth-koppelingen wissen", systemImage: "trash")
-                    }
-                } header: {
-                    Text("Gevaarlijk")
-                } footer: {
-                    Text("Deze acties resetten instellingen of ontkoppelen apparaten. Gebruik met beleid.")
-                }
-                .disabled(!connected)
-
-                Section {
-                    numeric("Lock-sleep", value: $lockSleep, range: 0...255, icon: "moon.zzz") { ble.setLockSleep($0) }
-                    numeric("Unlock-sleep", value: $unlockSleep, range: 0...255, icon: "moon") { ble.setUnlockSleep($0) }
-                } header: {
-                    Text("Energie (sleep)")
-                } footer: {
-                    Text("Hoe lang het slot wacht voor het in slaapstand gaat. Langer = sneller reageren, meer batterijverbruik.")
-                }
-                .disabled(!connected)
-
-                Section {
                     HStack {
                         TextField("index", text: $rawIdx).keyboardType(.numberPad).frame(width: 70)
                         Divider()
@@ -163,6 +149,20 @@ struct LockSettingsView: View {
                     Text("Parameter schrijven (geavanceerd)")
                 } footer: {
                     Text("Schrijf elke parameter-index + waarde rechtstreeks. Bekend: 1=PAC, 5=stall, 7=alarm-delay, 10=bump, 12=audio, 13=pulse-tap, 14=jostle, 16=accel-rate, 17=lock-sleep, 28=roll-hoek, 29=tilt-hoek, 30/50=unlock-sleep, 37=alarm-tijd, 55=quick-lock, 102=auto-lock, 106=beweeg-alarm. ⚠︎ Onbekende indexen/waarden op eigen risico.")
+                }
+                .disabled(!connected)
+
+                Section {
+                    Button(role: .destructive) { showDefaultConfirm = true } label: {
+                        Label("Standaardinstellingen herstellen", systemImage: "arrow.counterclockwise")
+                    }
+                    Button(role: .destructive) { showBondsConfirm = true } label: {
+                        Label("Bluetooth-koppelingen wissen", systemImage: "trash")
+                    }
+                } header: {
+                    Text("Gevaarlijk")
+                } footer: {
+                    Text("Deze acties resetten instellingen of ontkoppelen apparaten. Gebruik met beleid.")
                 }
                 .disabled(!connected)
             }

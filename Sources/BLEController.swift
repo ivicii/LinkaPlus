@@ -332,7 +332,6 @@ final class BLEController: NSObject, ObservableObject {
         lastReadHex = nil; lastReadLabel = label
         decodedReadValue = nil
         readFrames = []
-        readDeadline = Date().addingTimeInterval(1.5)
         sendPayload(LinkaCrypto.readPayload(idx: idx), name: "Lees \(label)")
         // Close the capture window after ~1.5 s and try to decode a value frame.
         Task { [weak self] in

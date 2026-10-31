@@ -295,6 +295,11 @@ struct LockDetailView: View {
     @ViewBuilder
     private var slotinstellingenSection: some View {
         Section {
+            if !ble.ready {
+                Label("Verbind via Bluetooth om instellingen te wijzigen",
+                      systemImage: "antenna.radiowaves.left.and.right.slash")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
             Toggle(isOn: Binding(
                 get: { movementAlarmOn },
                 set: { on in
@@ -318,11 +323,15 @@ struct LockDetailView: View {
             Button {
                 if let code = Int(pacCode) { ble.setPAC(code) }
             } label: { Label("PAC-code instellen", systemImage: "checkmark.circle") }
-                .disabled(pacCode.count < 4)
+                .disabled(!ble.ready || pacCode.count < 4)
+
+            Button { showLockSettings = true } label: {
+                Label("Alle slotinstellingen…", systemImage: "slider.horizontal.3")
+            }
         } header: {
-            Text("Slotinstellingen (Bluetooth)")
+            Text("Slotinstellingen")
         } footer: {
-            Text("Beweeg-alarm laat het slot waarschuwen bij beweging. De PAC-code is de tapcode om zonder telefoon te openen.")
+            Text("Beweeg-alarm laat het slot waarschuwen bij beweging. De PAC-code is de tapcode om zonder telefoon te openen. Onder \"Alle slotinstellingen\" staan de volledige parameters (gevoeligheid, auto-lock, energie).")
         }
     }
 
@@ -355,7 +364,7 @@ struct LockDetailView: View {
                 Text(recoveryMessage).font(.caption).foregroundStyle(.secondary)
             }
         } header: {
-            Text("Live tracking")
+            Text("Locatie & tracking")
         } footer: {
             Text("Op de LEO armt de anti-diefstal/tracking meestal vanzelf: sluit het slot, dan houdt het bij beweging zelf de GPS bij en mailt je. Handmatig starten kan \"not currently active\" geven als er geen actieve trackingsessie is. Vereist resterende data in je dataplan.")
         }
@@ -363,9 +372,7 @@ struct LockDetailView: View {
 
     @ViewBuilder
     private var beheerSection: some View {
-        Section("Beheer") {
-            Button { showLockSettings = true } label: { Label("Alle slotinstellingen", systemImage: "slider.horizontal.3") }
-            Button { showStats = true } label: { Label("Statistieken", systemImage: "chart.bar.fill") }
+        Section("Delen & beheer") {
             Button { showSharing = true } label: { Label("Delen & toegang", systemImage: "person.2.fill") }
             Button { renameText = lock.displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
         }
@@ -399,6 +406,9 @@ struct LockDetailView: View {
     @ViewBuilder
     private var activiteitenSection: some View {
         Section("Activiteiten") {
+            Button { showStats = true } label: {
+                Label("Statistieken", systemImage: "chart.bar.fill")
+            }
             if busy && activities.isEmpty {
                 HStack { ProgressView(); Text("Laden…").foregroundStyle(.secondary) }
             } else if activities.isEmpty {
@@ -550,14 +560,22 @@ struct LockDetailView: View {
 
     private var settingsPage: some View {
         List {
+            // 1 — Overzicht
             statusSection
-            sensorsSection
-            dataplanSection
-            if ble.ready { slotinstellingenSection }
+            // 2 — Wat je instelt
+            slotinstellingenSection
+            // 3 — Waar het slot is
             trackingSection
-            beheerSection
-            geavanceerdSection
+            // 4 — Connectiviteit
+            dataplanSection
+            // 5 — Geschiedenis
             activiteitenSection
+            // 6 — Delen & naam
+            beheerSection
+            // 7 — Diagnose / techniek (onderaan)
+            sensorsSection
+            geavanceerdSection
+            // 8 — Over
             Section {
                 EmptyView()
             } footer: {
