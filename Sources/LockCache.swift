@@ -58,4 +58,19 @@ enum LockPrefs {
         let v = UserDefaults.standard.integer(forKey: "pac_\(serial)")
         return v > 0 ? v : nil
     }
+
+    /// Remember the last value written for a numeric setting (the lock doesn't
+    /// return these over BLE, so we show what was last set rather than a canned
+    /// default). `fallback` is used when nothing was stored yet.
+    static func setInt(_ v: Int, key: String, serial: String?) {
+        guard let serial else { return }
+        UserDefaults.standard.set(v, forKey: "set_\(key)_\(serial)")
+    }
+    static func int(_ key: String, serial: String?, fallback: Int) -> Int {
+        guard let serial else { return fallback }
+        let k = "set_\(key)_\(serial)"
+        return UserDefaults.standard.object(forKey: k) == nil
+            ? fallback
+            : UserDefaults.standard.integer(forKey: k)
+    }
 }

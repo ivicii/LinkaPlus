@@ -37,8 +37,8 @@ struct LockSettingsView: View {
 
     private func frameLabel(_ hex: String) -> String {
         let h = hex.lowercased()
-        if h.hasPrefix("1402") { return "ACK / bevestiging" }
-        if h.hasPrefix("140a") { return "Statuspakket (0x0A)" }
+        if h.hasPrefix("1402") { return "Statusframe (batterij/vlaggen)" }
+        if h.hasPrefix("140a") { return "Bewegingspakket (0x0A)" }
         if h.hasPrefix("1412") || h.hasPrefix("12")  { return "Context (teller)" }
         return "Onbekend frame"
     }
@@ -75,10 +75,10 @@ struct LockSettingsView: View {
                 .disabled(!connected)
 
                 Section {
-                    numeric("Bump-drempel (mg)", value: $bump, range: 0...255, icon: "waveform.path") { ble.setBumpThreshold($0) }
-                    numeric("Stall-vertraging (×100 ms)", value: $stall, range: 0...50, icon: "hourglass") { ble.setStall($0) }
-                    numeric("Alarm-vertraging (s)", value: $alarmDelay, range: 0...60, icon: "timer") { ble.setAlarmDelay($0) }
-                    numeric("Alarm-duur (s)", value: $alarmTime, range: 0...255, icon: "alarm") { ble.setAlarmTime($0) }
+                    numeric("Bump-drempel (mg)", value: $bump, range: 0...255, icon: "waveform.path", key: "bump") { ble.setBumpThreshold($0) }
+                    numeric("Stall-vertraging (×100 ms)", value: $stall, range: 0...50, icon: "hourglass", key: "stall") { ble.setStall($0) }
+                    numeric("Alarm-vertraging (s)", value: $alarmDelay, range: 0...60, icon: "timer", key: "alarmDelay") { ble.setAlarmDelay($0) }
+                    numeric("Alarm-duur (s)", value: $alarmTime, range: 0...255, icon: "alarm", key: "alarmTime") { ble.setAlarmTime($0) }
                 } header: {
                     Text("Alarm & gevoeligheid")
                 } footer: {
@@ -87,11 +87,11 @@ struct LockSettingsView: View {
                 .disabled(!connected)
 
                 Section {
-                    numeric("Roll-alarm (°, zijwaarts)", value: $rollAngle, range: 0...90, icon: "rotate.3d") { ble.setRollAngle($0) }
-                    numeric("Pitch-alarm (°, voor/achter)", value: $tiltAngle, range: 0...90, icon: "gyroscope") { ble.setTiltAngle($0) }
-                    numeric("Jostle (×100 ms)", value: $jostle, range: 0...50, icon: "waveform") { ble.setJostle($0) }
-                    numeric("Accel data-rate", value: $accelRate, range: 0...10, icon: "speedometer") { ble.setAccelDataRate($0) }
-                    numeric("Pulse-drempel (mg)", value: $pulseTap, range: 0...255, icon: "hand.tap") { ble.setPulseTap($0) }
+                    numeric("Roll-alarm (°, zijwaarts)", value: $rollAngle, range: 0...90, icon: "rotate.3d", key: "rollAngle") { ble.setRollAngle($0) }
+                    numeric("Pitch-alarm (°, voor/achter)", value: $tiltAngle, range: 0...90, icon: "gyroscope", key: "tiltAngle") { ble.setTiltAngle($0) }
+                    numeric("Jostle (×100 ms)", value: $jostle, range: 0...50, icon: "waveform", key: "jostle") { ble.setJostle($0) }
+                    numeric("Accel data-rate", value: $accelRate, range: 0...10, icon: "speedometer", key: "accelRate") { ble.setAccelDataRate($0) }
+                    numeric("Pulse-drempel (mg)", value: $pulseTap, range: 0...255, icon: "hand.tap", key: "pulseTap") { ble.setPulseTap($0) }
                 } header: {
                     Text("Kanteling-alarm & gevoeligheid")
                 } footer: {
@@ -100,8 +100,8 @@ struct LockSettingsView: View {
                 .disabled(!connected)
 
                 Section {
-                    numeric("Lock-sleep (s)", value: $lockSleep, range: 0...255, icon: "moon.zzz") { ble.setLockSleep($0) }
-                    numeric("Unlock-sleep (s)", value: $unlockSleep, range: 0...255, icon: "moon") { ble.setUnlockSleep($0) }
+                    numeric("Lock-sleep (s)", value: $lockSleep, range: 0...255, icon: "moon.zzz", key: "lockSleep") { ble.setLockSleep($0) }
+                    numeric("Unlock-sleep (s)", value: $unlockSleep, range: 0...255, icon: "moon", key: "unlockSleep") { ble.setUnlockSleep($0) }
                 } header: {
                     Text("Energie (sleep)")
                 } footer: {
@@ -204,6 +204,18 @@ struct LockSettingsView: View {
                 autoLock = LockPrefs.bool("autoLock", serial: serial)
                 quickLock = LockPrefs.bool("quickLock", serial: serial)
                 audioOn = LockPrefs.bool("audio", serial: serial)
+                // Restore last-written numeric values (lock doesn't return them).
+                bump = LockPrefs.int("bump", serial: serial, fallback: bump)
+                stall = LockPrefs.int("stall", serial: serial, fallback: stall)
+                alarmDelay = LockPrefs.int("alarmDelay", serial: serial, fallback: alarmDelay)
+                alarmTime = LockPrefs.int("alarmTime", serial: serial, fallback: alarmTime)
+                rollAngle = LockPrefs.int("rollAngle", serial: serial, fallback: rollAngle)
+                tiltAngle = LockPrefs.int("tiltAngle", serial: serial, fallback: tiltAngle)
+                jostle = LockPrefs.int("jostle", serial: serial, fallback: jostle)
+                accelRate = LockPrefs.int("accelRate", serial: serial, fallback: accelRate)
+                pulseTap = LockPrefs.int("pulseTap", serial: serial, fallback: pulseTap)
+                lockSleep = LockPrefs.int("lockSleep", serial: serial, fallback: lockSleep)
+                unlockSleep = LockPrefs.int("unlockSleep", serial: serial, fallback: unlockSleep)
             }
         }
     }
@@ -226,13 +238,16 @@ struct LockSettingsView: View {
 
     @ViewBuilder
     private func numeric(_ title: String, value: Binding<Int>, range: ClosedRange<Int>,
-                         icon: String, write: @escaping (Int) -> Void) -> some View {
+                         icon: String, key: String = "", write: @escaping (Int) -> Void) -> some View {
         HStack {
             Stepper(value: value, in: range) {
                 Label("\(title): \(value.wrappedValue)", systemImage: icon)
             }
-            Button("Schrijf") { write(value.wrappedValue) }
-                .buttonStyle(.bordered).font(.footnote)
+            Button("Schrijf") {
+                write(value.wrappedValue)
+                if !key.isEmpty { LockPrefs.setInt(value.wrappedValue, key: key, serial: serial) }
+            }
+            .buttonStyle(.bordered).font(.footnote)
         }
     }
 }

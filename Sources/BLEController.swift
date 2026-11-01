@@ -37,7 +37,6 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var lastReadHex: String?
     @Published private(set) var lastReadLabel: String?
     @Published private(set) var readFrames: [String] = []
-    @Published private(set) var decodedReadValue: String?
     private var awaitingRead: String?
 
     /// Firmware revision read from the standard Device Information Service (0x2A26).
@@ -103,14 +102,16 @@ final class BLEController: NSObject, ObservableObject {
         let mv = Int(d[4]) | (Int(d[5]) << 8)
         let v = Double(mv) / 1000.0
         if v > 1.0 && v < 6.0 { batteryVoltageBLE = v }
-        // Lock state (byte[2]): 3/5 = locked, 4/6 = unlocked, 1/2 = in transit.
+        // Lock state (byte[2], rc/b mapping). Shown as a diagnostic only — not yet
+        // validated against a physical lock/unlock, so it does NOT drive liveLocked
+        // (which stays authoritative from motor events + user actions).
         switch Int(d[2]) {
         case 1: lockStateText = "Vergrendelen…"
         case 2: lockStateText = "Ontgrendelen…"
-        case 3: lockStateText = "Vergrendeld";   if liveLocked == nil { liveLocked = true }
-        case 4: lockStateText = "Ontgrendeld";   if liveLocked == nil { liveLocked = false }
-        case 5: lockStateText = "Vergrendeld (PAC)"; if liveLocked == nil { liveLocked = true }
-        case 6: lockStateText = "Ontgrendeld (PAC)"; if liveLocked == nil { liveLocked = false }
+        case 3: lockStateText = "Vergrendeld"
+        case 4: lockStateText = "Ontgrendeld"
+        case 5: lockStateText = "Vergrendeld (PAC)"
+        case 6: lockStateText = "Ontgrendeld (PAC)"
         default: break
         }
         // Status flags bitfield at bytes[12..15] (little-endian).
@@ -118,7 +119,7 @@ final class BLEController: NSObject, ObservableObject {
             let flags = UInt32(d[12]) | (UInt32(d[13]) << 8) | (UInt32(d[14]) << 16) | (UInt32(d[15]) << 24)
             let active = Self.flagLabels.filter { flags & $0.0 != 0 }.map { $0.1 }
             statusFlags = active
-            isChargingBLE = (flags & 0x04) != 0 || (flags & 0x08) != 0
+            isChargingBLE = (flags & 0x04) != 0   // 0x04=Opladen (0x08=Volgeladen is niet 'opladen')
             // Notify on the rising edge of any critical flag.
             let now = Set(active)
             for flag in now.subtracting(prevFlagSet) {
@@ -308,6 +309,8 @@ final class BLEController: NSObject, ObservableObject {
             add("Config onvolledig (key \(subkey.count)B, mac \(mac.count)B)."); return
         }
         guard central.state == .poweredOn else { add("Bluetooth niet aan."); return }
+        // Avoid overlapping scans/connects from auto-reconnect + UI buttons.
+        guard state != "scannen", state != "verbinden", state != "services" else { return }
         intentionalStop = false
         state = "scannen"; ready = false
         add("Scannen naar slot…")
@@ -423,7 +426,6 @@ final class BLEController: NSObject, ObservableObject {
     private func beginRead(_ label: String, idx: Int) {
         awaitingRead = label
         lastReadHex = nil; lastReadLabel = label
-        decodedReadValue = nil
         readFrames = []
         sendPayload(LinkaCrypto.readPayload(idx: idx), name: "Lees \(label)")
         // Close the capture window after ~1.5 s and try to decode a value frame.
@@ -447,13 +449,11 @@ final class BLEController: NSObject, ObservableObject {
         }
         let value = frames.first(where: { !isAck($0) && $0.count >= 8 })
         if let value {
-            decodedReadValue = value
             lastReadHex = value
-            add("READ(\(label)) waarde-frame: \(value)")
+            add("READ(\(label)) niet-ack frame: \(value)")
         } else if let only = frames.first {
             lastReadHex = only
-            decodedReadValue = nil
-            add("READ(\(label)): alleen ack ontvangen (\(frames.count) frame(s)) — geen los waarde-frame.")
+            add("READ(\(label)): \(frames.count) statusframe(s) ontvangen.")
         } else {
             add("READ(\(label)): geen respons ontvangen.")
         }
@@ -487,7 +487,14 @@ final class BLEController: NSObject, ObservableObject {
 
 extension BLEController: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        Task { @MainActor in if central.state != .poweredOn { add("BT status \(central.state.rawValue)") } }
+        Task { @MainActor in
+            if central.state == .poweredOn {
+                // Bluetooth came back on — resume unless the user stopped on purpose.
+                if !intentionalStop, !ready, subkey.count == 16, mac.count == 6 { start() }
+            } else {
+                add("BT status \(central.state.rawValue)")
+            }
+        }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                                     advertisementData: [String: Any], rssi RSSI: NSNumber) {

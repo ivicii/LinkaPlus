@@ -108,10 +108,16 @@ struct LockDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
+                let sirenOn = ble.statusFlags.contains("Sirene actief")
                 Button {
                     Haptic.tap()
-                    if ble.ready { ble.sirenOn() } else { playSiren() }
-                } label: { Image(systemName: "speaker.wave.3.fill") }
+                    if sirenOn { ble.sirenOff() }
+                    else if ble.ready { ble.sirenOn() }
+                    else { playSiren() }
+                } label: {
+                    Image(systemName: sirenOn ? "speaker.slash.fill" : "speaker.wave.3.fill")
+                        .foregroundStyle(sirenOn ? Theme.danger : Theme.accent)
+                }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button { showSettings = true } label: {
@@ -132,6 +138,13 @@ struct LockDetailView: View {
             loadSim()
         }
         .onChange(of: ble.liveLocked) { v in if let v { heroLocked = v } }
+        .onChange(of: ble.commandResult) { r in
+            // Revert the optimistic flip if the command didn't take.
+            switch r {
+            case .rejected, .blocked, .timeout: heroLocked = liveLocked
+            default: break
+            }
+        }
         .onChange(of: ble.ctxCounter) { _ in maybeAutoUnlock() }
         .onChange(of: router.unlockRequested) { _ in maybeAutoUnlock() }
         .refreshable {
@@ -243,9 +256,6 @@ struct LockDetailView: View {
                 value: statusText,
                 systemImage: statusIcon
             )
-            if let ls = ble.lockStateText {
-                statusRow("Slotstand (uit slot)", value: ls, systemImage: "lock.square")
-            }
             if let battery = latestBattery {
                 let low = battery < Theme.batteryLowPct && !ble.isChargingBLE
                 HStack {
@@ -388,6 +398,10 @@ struct LockDetailView: View {
             HStack {
                 TextField("nieuwe 4 cijfers", text: $pacCode)
                     .keyboardType(.numberPad)
+                    .onChange(of: pacCode) { v in
+                        let digits = v.filter(\.isNumber)
+                        pacCode = String(digits.prefix(4))
+                    }
                 Spacer()
                 Button("Instellen") {
                     if let code = Int(pacCode) {
@@ -405,7 +419,7 @@ struct LockDetailView: View {
                 Label("Alle slotinstellingen…", systemImage: "gearshape.2")
             }
         } header: {
-            Text("Slotinstellingen")
+            Text("Snelle instellingen")
         } footer: {
             Text("Beweeg-alarm waarschuwt bij beweging. De PAC-code is de tapcode om zonder telefoon te openen — de LEO geeft die niet terug over Bluetooth, dus de app onthoudt wat jij instelt. Onder \"Alle slotinstellingen\" staan alle parameters.")
         }
@@ -553,6 +567,9 @@ struct LockDetailView: View {
             }
             if let v = ble.batteryVoltageBLE {
                 statusRow("Accuspanning", value: String(format: "%.2f V", v), systemImage: "bolt.fill")
+            }
+            if let ls = ble.lockStateText {
+                statusRow("Slotstand (ruw uit frame)", value: ls, systemImage: "lock.square")
             }
             if let t = ble.infoTempC {
                 statusRow("Temperatuur (≈)", value: "\(t) °C", systemImage: "thermometer.medium")
@@ -730,9 +747,11 @@ struct LockDetailView: View {
             .foregroundStyle(.secondary)
 
             // Lock-shaped control — the bolt bar slides to follow open/close.
+            // Drives off heroLocked (which always has a value: BLE → cloud →
+            // default), so the primary control is never inert while connected.
             Button {
                 Haptic.tap()
-                guard let locked = knownLocked else { Haptic.warning(); return }
+                let locked = heroLocked
                 heroLocked = !locked
                 ble.channel = 0; ble.counterOffset = 0
                 if locked { ble.unlock() } else { ble.lock() }
@@ -751,7 +770,8 @@ struct LockDetailView: View {
             HStack(spacing: 22) {
                 heroStat(statusText, statusIcon, heroColor)
                 if let b = latestBattery {
-                    heroStat("\(b)%", batteryIcon(b), b < 20 ? Theme.danger : .secondary)
+                    heroStat("\(b)%", ble.isChargingBLE ? "battery.100.bolt" : batteryIcon(b),
+                             b < Theme.batteryLowPct && !ble.isChargingBLE ? Theme.danger : .secondary)
                 }
                 if let d = distanceText {
                     heroStat(d, "location.fill", .secondary)
@@ -821,10 +841,8 @@ struct LockDetailView: View {
             .disabled(!ble.ready)
 
             HStack(spacing: 14) {
-                if ble.ready {
-                    Button { showFinder = true } label: {
-                        Label("Zoek je slot", systemImage: "dot.radiowaves.left.and.right").font(.footnote)
-                    }
+                Button { showFinder = true } label: {
+                    Label("Zoek je slot", systemImage: "dot.radiowaves.left.and.right").font(.footnote)
                 }
                 Spacer()
                 if ble.state == "verbroken" || ble.state == "gestopt" {
