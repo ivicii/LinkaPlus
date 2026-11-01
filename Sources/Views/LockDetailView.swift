@@ -194,7 +194,7 @@ struct LockDetailView: View {
         if f.hasPrefix("Alarm") || f == "Sirene actief" || f == "Gekanteld"
             || f == "Stoot gedetecteerd" || f == "Motor vastgelopen" { return Theme.danger }
         if f == "Batterij laag" || f == "Foute PAC ingevoerd"
-            || f == "Ongeldige PAC ingesteld" || f == "Lage temperatuur" { return .orange }
+            || f == "Ongeldige PAC ingesteld" || f == "Lage temperatuur" { return Theme.warn }
         return .secondary
     }
 
@@ -247,15 +247,21 @@ struct LockDetailView: View {
                 statusRow("Slotstand (uit slot)", value: ls, systemImage: "lock.square")
             }
             if let battery = latestBattery {
+                let low = battery < Theme.batteryLowPct && !ble.isChargingBLE
                 HStack {
-                    Label("Batterij", systemImage: batteryIcon(battery))
+                    Label("Batterij", systemImage: ble.isChargingBLE ? "battery.100.bolt" : batteryIcon(battery))
+                        .foregroundStyle(low ? Theme.danger : .primary)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text("\(battery)%" + (ble.isChargingBLE ? " ⚡︎" : "")
-                             + (battery < 20 && !ble.isChargingBLE ? "  ⚠︎ laag" : "")
-                             + (ble.batteryVoltageBLE != nil ? String(format: "  ·  %.2f V", ble.batteryVoltageBLE!) : ""))
-                            .foregroundStyle(battery < 20 && !ble.isChargingBLE ? .red : .secondary)
-                        Text("via \(batterySource)").font(.caption2).foregroundStyle(.tertiary)
+                        HStack(spacing: 6) {
+                            Text("\(battery)%")
+                                .foregroundStyle(low ? Theme.danger : .primary)
+                            if let v = ble.batteryVoltageBLE {
+                                Text(String(format: "%.2f V", v)).foregroundStyle(.secondary)
+                            }
+                        }
+                        Text((ble.isChargingBLE ? "opladen · " : low ? "laag · " : "") + "via \(batterySource)")
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -306,7 +312,7 @@ struct LockDetailView: View {
                     }
                     if sim.payment_requires_attention == true {
                         Label("Betaling vereist", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
+                            .foregroundStyle(Theme.danger)
                     }
                     Button { loadSim() } label: {
                         Label("Vernieuwen", systemImage: "arrow.clockwise")
@@ -396,7 +402,7 @@ struct LockDetailView: View {
             }
 
             Button { showLockSettings = true } label: {
-                Label("Alle slotinstellingen…", systemImage: "slider.horizontal.3")
+                Label("Alle slotinstellingen…", systemImage: "gearshape.2")
             }
         } header: {
             Text("Slotinstellingen")
@@ -454,7 +460,7 @@ struct LockDetailView: View {
             Button {
                 showBLEControl = true
             } label: {
-                Label("Geavanceerde bediening & auto-test", systemImage: "slider.horizontal.3")
+                Label("Geavanceerde bediening & auto-test", systemImage: "wrench.and.screwdriver")
             }
             Button {
                 showBLE = true
@@ -716,7 +722,7 @@ struct LockDetailView: View {
         VStack(spacing: 14) {
             HStack(spacing: 7) {
                 Circle()
-                    .fill(ble.ready ? Theme.locked : Color.orange)
+                    .fill(ble.ready ? Theme.accent : Color.secondary)
                     .frame(width: 9, height: 9)
                 Text(bleStatusText).font(.subheadline.weight(.semibold))
                 if !ble.ready && bleKeyError == nil { ProgressView().scaleEffect(0.7) }
@@ -770,7 +776,7 @@ struct LockDetailView: View {
         Button { showFullMap = true } label: {
             mapView
                 .frame(height: 148)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 .overlay(alignment: .topTrailing) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .font(.caption.weight(.bold))
@@ -828,7 +834,7 @@ struct LockDetailView: View {
                 }
             }
             if let e = bleKeyError {
-                Text(e).font(.caption2).foregroundStyle(.red)
+                Text(e).font(.caption2).foregroundStyle(Theme.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -838,12 +844,12 @@ struct LockDetailView: View {
     private var commandResultRow: some View {
         switch ble.commandResult {
         case .success(let n):
-            Label("\(n) gelukt", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.callout)
+            Label("\(n) gelukt", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.success).font(.callout)
         case .rejected:
-            Label("Geweigerd — probeer opnieuw", systemImage: "xmark.circle.fill").foregroundStyle(.red).font(.callout)
+            Label("Geweigerd — probeer opnieuw", systemImage: "xmark.circle.fill").foregroundStyle(Theme.danger).font(.callout)
         case .blocked:
-            Label("⚠︎ Niet gelukt — beweging of blokkade gedetecteerd. Houd het slot stil en probeer opnieuw.",
-                  systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.callout)
+            Label("Niet gelukt — beweging of blokkade gedetecteerd. Houd het slot stil en probeer opnieuw.",
+                  systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.warn).font(.callout)
         case .timeout:
             Label("Geen reactie van het slot — opnieuw proberen.", systemImage: "clock.badge.exclamationmark")
                 .foregroundStyle(.secondary).font(.callout)

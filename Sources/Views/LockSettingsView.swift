@@ -52,7 +52,7 @@ struct LockSettingsView: View {
                     Section {
                         Label("Niet verbonden — ga dichtbij je slot. Instellingen zijn uitgeschakeld tot 'Verbonden'.",
                               systemImage: "antenna.radiowaves.left.and.right.slash")
-                            .font(.caption).foregroundStyle(.orange)
+                            .font(.caption).foregroundStyle(Theme.warn)
                     }
                 }
 
@@ -212,11 +212,11 @@ struct LockSettingsView: View {
     private var commandResultRow: some View {
         switch ble.commandResult {
         case .success(let n):
-            Label("\(n) gelukt", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.callout)
+            Label("\(n) gelukt", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.success).font(.callout)
         case .rejected:
-            Label("Geweigerd — probeer opnieuw", systemImage: "xmark.circle.fill").foregroundStyle(.red).font(.callout)
+            Label("Geweigerd — probeer opnieuw", systemImage: "xmark.circle.fill").foregroundStyle(Theme.danger).font(.callout)
         case .blocked(let n):
-            Label("\(n): niet gelukt", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.callout)
+            Label("\(n): niet gelukt", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.warn).font(.callout)
         case .timeout:
             Label("Geen reactie van het slot", systemImage: "clock.badge.exclamationmark").foregroundStyle(.secondary).font(.callout)
         case .none:

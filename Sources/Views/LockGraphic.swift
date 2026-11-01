@@ -19,7 +19,7 @@ struct LockGraphic: View {
                         style: StrokeStyle(lineWidth: size * 0.17, lineCap: .round))
                 .rotationEffect(.degrees(90))
                 .frame(width: size, height: size)
-                .shadow(color: color.opacity(0.45), radius: 18, y: 8)
+                .shadow(color: color.opacity(0.28), radius: 10, y: 6)
 
             // Bolt bar across the bottom gap.
             Capsule()
@@ -31,11 +31,14 @@ struct LockGraphic: View {
                 .offset(x: locked ? 0 : size * 0.21, y: size * 0.415)
                 .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
 
-            // Lock glyph in the centre.
+            // Lock glyph in the centre — tinted to the ring colour so it reads as
+            // part of the graphic, not a sticker on top. The sliding bolt carries
+            // the state; the glyph is a quiet reinforcement.
             Image(systemName: locked ? "lock.fill" : "lock.open.fill")
-                .font(.system(size: size * 0.22, weight: .bold))
-                .foregroundStyle(.white)
+                .font(.system(size: size * 0.20, weight: .semibold))
+                .foregroundStyle(color)
                 .offset(y: -size * 0.04)
+                .animation(.easeInOut(duration: 0.3), value: locked)
         }
         .frame(width: size, height: size)
         .animation(.easeInOut(duration: 1.2), value: locked)

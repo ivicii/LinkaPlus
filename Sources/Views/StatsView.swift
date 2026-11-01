@@ -152,13 +152,13 @@ struct StatsView: View {
         Section {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 Button { Haptic.tap(.light); showActivityList = true } label: {
-                    tile("Activiteiten", "\(activities.count)", "list.bullet", .blue, tappable: true)
+                    tile("Activiteiten", "\(activities.count)", "list.bullet", Theme.accent, tappable: true)
                 }
                 .buttonStyle(.plain)
-                tile("Batterij", currentBattery.map { "\($0)%" } ?? "–", "battery.100",
-                     (currentBattery ?? 100) < 20 ? .red : Theme.locked)
+                tile("Batterij", currentBattery.map { "\($0)%" } ?? "–", batteryIcon(currentBattery),
+                     (currentBattery ?? 100) < Theme.batteryLowPct ? Theme.danger : Theme.locked)
                 tile("Geopend", "\(opens)", "lock.open", Theme.open)
-                tile("Gesloten", "\(closes)", "lock", .indigo)
+                tile("Gesloten", "\(closes)", "lock", Theme.locked)
             }
             .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
             if let last = lastUsed {
@@ -211,7 +211,7 @@ struct StatsView: View {
                 x: .value("Tijd", b.date, unit: gran.chartUnit),
                 y: .value("Aantal", b.count)
             )
-            .foregroundStyle(selected == b.date ? Theme.accent : Color.blue.opacity(0.85))
+            .foregroundStyle(selected == b.date ? Theme.accent : Theme.accent.opacity(0.28))
             .cornerRadius(4)
         }
         .chartYAxis {
@@ -267,6 +267,17 @@ struct StatsView: View {
         }
     }
 
+    private func batteryIcon(_ pct: Int?) -> String {
+        guard let p = pct else { return "battery.0" }
+        switch p {
+        case ..<15: return "battery.0"
+        case ..<40: return "battery.25"
+        case ..<70: return "battery.50"
+        case ..<90: return "battery.75"
+        default:    return "battery.100"
+        }
+    }
+
     private func tile(_ title: String, _ value: String, _ icon: String, _ color: Color,
                       tappable: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -276,7 +287,7 @@ struct StatsView: View {
                 if tappable {
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
                 }
             }
             Text(value).font(.title2.bold()).foregroundStyle(.primary)
@@ -284,7 +295,13 @@ struct StatsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(color.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(
+            RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
+                        .strokeBorder(color.opacity(0.35), lineWidth: 1)
+                )
+        )
     }
 }
