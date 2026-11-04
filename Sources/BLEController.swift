@@ -525,6 +525,18 @@ final class BLEController: NSObject, ObservableObject {
             readSettings([30])
         }
     }
+    /// Power mode like the official SettingsBatteryFragment: writes locked sleep (17)
+    /// and unlocked sleep (30 + 50) with the same value. 600 = power saving,
+    /// 36000 = high performance.
+    func setPowerMode(seconds s: Int) {
+        sendPayload(LinkaCrypto.settingPayload(idx: 17, value: s), name: "Slaap (dicht) \(s) s")
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            setUnlockSleep(s)
+            try? await Task.sleep(nanoseconds: 4_500_000_000)
+            readSettings([17, 30])
+        }
+    }
     /// Raw parameter write — for advanced/experimental settings.
     func writeSetting(idx: Int, value: Int) {
         // Never expose identity / key / bonding / bootloader / motor-code slots.

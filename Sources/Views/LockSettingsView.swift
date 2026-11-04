@@ -197,6 +197,29 @@ struct SlotSettingsPage: View {
                           ble: ble, enabled: connected, apply: apply)
     }
 
+    private var powerModeRow: some View {
+        let cur = ble.settingValues[17]
+        let modes: [(String, String, Int)] = [("Besparend", "10 min", 600), ("Standaard", "2 uur", 7200), ("Prestatie", "10 uur", 36000)]
+        return HStack(spacing: 8) {
+            ForEach(modes, id: \.2) { m in
+                let on = cur == m.2
+                Button { ble.setPowerMode(seconds: m.2) } label: {
+                    VStack(spacing: 2) {
+                        Text(m.0).font(.subheadline.weight(.semibold))
+                        Text(m.1).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(on ? Theme.accent.opacity(0.22) : Color(.tertiarySystemFill)))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(on ? Theme.accent : .clear, lineWidth: 1.5))
+                }
+                .buttonStyle(.plain)
+                .disabled(!connected)
+            }
+        }
+    }
+
     private var pacText: String {
         if let p = ble.lockPAC { return String(format: "%04d", p) }
         if let s = LockPrefs.pac(serial: serial) { return String(format: "%04d", s) + " (laatst ingesteld)" }
@@ -277,9 +300,14 @@ struct SlotSettingsPage: View {
                 Text("Volgens de LINKA-documentatie: het slot sluit zichzelf na een periode zonder beweging (index 102; de officiële app schrijft 20 = aan). Werkt alleen als de beugel vrij kan sluiten — laat hem uit als je je fiets vaak even open laat staan.")
             }
             Section {
+                powerModeRow
+            } header: { Text("Energiemodus") } footer: {
+                Text("Zoals in de officiële app. Het slot blijft zo lang wakker (zichtbaar via Bluetooth) na de laatste activiteit; daarna slaapt het tot je op de knop drukt of het beweegt. Langer wakker = sneller verbinden, vaker opladen.")
+            }
+            Section {
                 stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 600...86400, step: 60) { ble.setLockSleep($0) }
                 stepper("Unlock-sleep", unit: "s", icon: "moon", idx: 30, range: 600...86400, step: 60) { ble.setUnlockSleep($0) }
-            } header: { Text("Slaapstand") } footer: {
+            } header: { Text("Slaapstand (handmatig)") } footer: {
                 Text("Hoe lang het slot wacht voordat het in slaap valt. Langer = sneller reageren, meer batterijverbruik.")
             }
 
