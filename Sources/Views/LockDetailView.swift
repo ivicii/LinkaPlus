@@ -711,6 +711,11 @@ struct LockDetailView: View {
                 NavigationLink {
                     SlotSettingsPage(kind: .maintenance, ble: ble, serial: lock.serial_no)
                 } label: { Label("Onderhoud & uitlezen", systemImage: "wrench") }
+                if let serial = lock.serial_no {
+                    NavigationLink {
+                        TrackingTestView(serial: serial)
+                    } label: { Label("Tracking-test", systemImage: "location.viewfinder") }
+                }
             }
             geavanceerdSection
         }

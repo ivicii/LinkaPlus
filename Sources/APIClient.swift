@@ -108,7 +108,7 @@ struct APIClient {
     }
 
     /// Single-lock lookup by serial (the `/api/locks?query={"serial_no":...}` route).
-    private func lockSingle(serial: String, auth: Identity) async throws -> Lock? {
+    func lockSingle(serial: String, auth: Identity) async throws -> Lock? {
         var comps = URLComponents(string: Self.baseURL.absoluteString + "/api/locks")!
         comps.queryItems = [URLQueryItem(name: "query", value: "{\"serial_no\":\"\(serial)\"}")]
         var req = URLRequest(url: comps.url!)
