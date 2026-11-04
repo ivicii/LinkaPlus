@@ -62,6 +62,13 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var lockReason: Int?
     /// Opt-in: unlock when the lock's button is pressed while this phone is connected.
     @Published var autoUnlockEnabled = false
+    /// Proximity auto-unlock (like the official Linka.updateRSSI/doAutoUnlock):
+    /// latch "away" when locked and the signal drops very low or the link is lost;
+    /// unlock once when you come back within range. Opt-in.
+    @Published var proximityUnlockEnabled = false
+    var proximityThreshold = -70
+    @Published private(set) var awayLatched = false
+    private var nearCount = 0
     private var lastAutoUnlock = Date.distantPast
 
     /// Flags that warrant a push notification, with their notification text.
@@ -363,6 +370,18 @@ final class BLEController: NSObject, ObservableObject {
     func stopTest() { testing = false }
     func clearCommandResult() { commandResult = nil }
 
+    private func handleProximity(_ r: Int) {
+        guard proximityUnlockEnabled, liveLocked == true else { nearCount = 0; return }
+        if r < -95 { if !awayLatched { add("Nabijheid: buiten bereik (\(r) dBm)") }; awayLatched = true; nearCount = 0; return }
+        guard awayLatched, r >= proximityThreshold, ctxCounter != nil else { nearCount = 0; return }
+        nearCount += 1
+        if nearCount >= 3 {
+            awayLatched = false; nearCount = 0
+            add("Nabijheid: terug binnen bereik (\(r) dBm) → auto-unlock")
+            unlock()
+        }
+    }
+
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
@@ -615,6 +634,7 @@ extension BLEController: CBCentralManagerDelegate {
             ready = false; state = "verbroken"; add("Verbinding verbroken.")
             didInitialStatusPing = false
             lastUsedCounter = nil
+            if proximityUnlockEnabled, liveLocked == true { awayLatched = true; nearCount = 0 }
             ctxCounter = nil; ctxEncVer = nil
             // Auto-reconnect unless the user intentionally stopped.
             if !intentionalStop, subkey.count == 16, mac.count == 6 {
@@ -718,6 +738,10 @@ extension BLEController: CBPeripheralDelegate {
         Task { @MainActor in add(error == nil ? "✓ commando geschreven" : "✗ schrijven mislukt: \(error!.localizedDescription)") }
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
-        Task { @MainActor in if error == nil { rssi = RSSI.intValue } }
+        Task { @MainActor in
+            guard error == nil else { return }
+            rssi = RSSI.intValue
+            handleProximity(RSSI.intValue)
+        }
     }
 }

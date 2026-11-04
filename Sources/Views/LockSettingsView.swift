@@ -247,12 +247,25 @@ struct SlotSettingsPage: View {
             Section {
                 SettingToggleRow(title: "Quick-lock", icon: "bolt.horizontal", idx: 55,
                                  ble: ble, enabled: connected) { ble.setAllowUnconnLock($0) }
-                SettingToggleRow(title: "Auto-unlock", icon: "hand.tap", idx: 102,
+                SettingToggleRow(title: "Knopbediening via telefoon", icon: "hand.tap", idx: 102,
                                  ble: ble, enabled: connected) { ble.setQuickLock($0) }
                 SettingToggleRow(title: "Geluid & pieptonen", icon: "speaker.wave.2", idx: 12,
                                  ble: ble, enabled: connected) { ble.setAudio($0) }
             } header: { Text("Knop & geluid") } footer: {
-                Text("Quick-lock: POWER-knop lang indrukken sluit het slot, ook zonder telefoon (index 55).\nAuto-unlock: POWER-knop lang indrukken opent én sluit, maar alleen als je telefoon via Bluetooth verbonden is (index 102).")
+                Text("Quick-lock: POWER-knop lang indrukken sluit het slot, ook zonder telefoon (index 55).\nKnopbediening via telefoon: POWER-knop lang indrukken opent én sluit, alleen als je telefoon via Bluetooth verbonden is (index 102).")
+            }
+            Section {
+                Toggle(isOn: Binding(
+                    get: { ble.proximityUnlockEnabled },
+                    set: { v in ble.proximityUnlockEnabled = v; LockPrefs.setBool(v, key: "proximityUnlock", serial: serial) }
+                )) { Label("Auto-unlock (nabijheid)", systemImage: "figure.walk.arrival") }
+                if ble.proximityUnlockEnabled {
+                    Label(ble.awayLatched ? "Buiten bereik geweest — opent bij terugkomst" : "Wacht tot je weggaat",
+                          systemImage: ble.awayLatched ? "arrow.uturn.backward.circle" : "clock")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } header: { Text("Auto-unlock") } footer: {
+                Text("Slot dicht → je loopt weg (verbinding weg of signaal zwak) → komt terug binnen ±5 m → de app opent het slot één keer. Werkt alleen als LinkaPlus actief verbonden is; op de achtergrond kan iOS het scannen beperken. Standaard uit — een slot dat vanzelf opengaat is minder veilig.")
             }
             Section {
                 stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 600...86400, step: 60) { ble.setLockSleep($0) }

@@ -134,6 +134,7 @@ struct LockDetailView: View {
             if didInitialLoad { await startBLE(); return }
             didInitialLoad = true
             localActs = LocalActivityLog.load(serial: lock.serial_no)
+            ble.proximityUnlockEnabled = LockPrefs.bool("proximityUnlock", serial: lock.serial_no)
             LockNotifier.shared.requestAuth()
             heroLocked = ble.liveLocked ?? lock.is_locked ?? true
             loc.start()
