@@ -10,6 +10,7 @@ struct LockGraphic: View {
     /// State colour (green locked, orange open, blue unknown).
     let color: Color
     var size: CGFloat = 200
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let ringColor = Color(UIColor { t in
         t.userInterfaceStyle == .dark ? UIColor(white: 0.90, alpha: 1) : UIColor(white: 0.17, alpha: 1)
@@ -42,7 +43,7 @@ struct LockGraphic: View {
         }
         .offset(y: -size * 0.03)
         .frame(width: size, height: size)
-        .animation(.easeInOut(duration: 1.0), value: locked)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: locked)
         .animation(.easeInOut(duration: 0.3), value: color)
     }
 }

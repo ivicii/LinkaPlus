@@ -36,6 +36,7 @@ struct LockDetailView: View {
     @State private var showFullMap = false
     @State private var showFirmware = false
     @State private var heroLocked = true
+    @State private var didInitialLoad = false
 
     private var liveLocked: Bool { ble.liveLocked ?? lock.is_locked ?? true }
 
@@ -90,16 +91,23 @@ struct LockDetailView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            compactMap
-            Spacer(minLength: 10)
-            heroControl
-            Spacer(minLength: 10)
-            mainButtons
+        GeometryReader { geo in
+            // Adapt to the phone: hide the map on short screens, shrink the lock.
+            let compact = geo.size.height < 640
+            let lockSize = min(230, max(140, geo.size.height - (compact ? 320 : 470)))
+            VStack(spacing: 0) {
+                if !compact {
+                    compactMap
+                    Spacer(minLength: 10)
+                }
+                heroControl(size: lockSize)
+                Spacer(minLength: 10)
+                mainButtons
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(lock.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -111,6 +119,9 @@ struct LockDetailView: View {
         }
         .navigationDestination(isPresented: $showSettings) { settingsPage }
         .task {
+            // Returning from a pushed settings page must not reload everything.
+            if didInitialLoad { await startBLE(); return }
+            didInitialLoad = true
             LockNotifier.shared.requestAuth()
             heroLocked = ble.liveLocked ?? lock.is_locked ?? true
             loc.start()
@@ -123,8 +134,15 @@ struct LockDetailView: View {
         .onChange(of: ble.commandResult) { r in
             // Revert the optimistic flip if the command didn't take.
             switch r {
-            case .rejected, .blocked, .timeout: heroLocked = liveLocked
+            case .rejected, .blocked, .timeout: heroLocked = knownLocked ?? !heroLocked
             default: break
+            }
+            // Don't leave a stale "gelukt" row on screen.
+            if let r {
+                Task {
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    if ble.commandResult == r { ble.clearCommandResult() }
+                }
             }
         }
         .onChange(of: ble.ctxCounter) { _ in maybeAutoUnlock() }
@@ -664,7 +682,7 @@ struct LockDetailView: View {
         switch ble.state {
         case "scannen": return "Zoeken naar slot…"
         case "verbinden", "services": return "Verbinden…"
-        case "klaar": return ble.ready ? "Verbonden" : "Verbonden"
+        case "klaar": return "Verbonden"
         case "verbroken", "gestopt": return "Niet verbonden"
         default: return ble.ready ? "Verbonden" : "Verbinden…"
         }
@@ -690,7 +708,7 @@ struct LockDetailView: View {
         return k ? "Tik op het slot om te openen" : "Tik op het slot om te sluiten"
     }
 
-    private var heroControl: some View {
+    private func heroControl(size: CGFloat) -> some View {
         VStack(spacing: 14) {
             connectionPill
 
@@ -702,11 +720,14 @@ struct LockDetailView: View {
                 ble.channel = 0; ble.counterOffset = 0
                 if locked { ble.unlock() } else { ble.lock() }
             } label: {
-                LockGraphic(locked: heroLocked, color: heroColor, size: 230)
+                LockGraphic(locked: heroLocked, color: heroColor, size: size)
+                    .accessibilityHidden(true)
             }
             .buttonStyle(PressableStyle())
             .disabled(!ble.ready)
             .opacity(ble.ready ? 1 : 0.45)
+            .accessibilityLabel(knownLocked == nil ? "Slotstatus onbekend" : (heroLocked ? "Slot is dicht" : "Slot is open"))
+            .accessibilityHint(heroSubtitle)
 
             // One fixed-height slot for hint / command result → no layout jumps.
             Group {
@@ -730,14 +751,15 @@ struct LockDetailView: View {
                 Circle().fill(ble.ready ? Theme.success : Color.secondary).frame(width: 8, height: 8)
                 Text(bleStatusText).font(.footnote.weight(.semibold))
                 if reconnectable { Image(systemName: "arrow.clockwise").font(.caption.weight(.bold)) }
-                else if !ble.ready && bleKeyError == nil { ProgressView().scaleEffect(0.65) }
+                else if !ble.ready && bleKeyError == nil { ProgressView().controlSize(.mini) }
             }
             .foregroundStyle(ble.ready ? Color.primary : Color.secondary)
             .padding(.horizontal, 12).padding(.vertical, 7)
             .background(Capsule().fill(Color(.secondarySystemBackground)))
         }
         .buttonStyle(.plain)
-        .disabled(!reconnectable)
+        .allowsHitTesting(reconnectable)
+        .accessibilityElement(children: .combine)
     }
 
     private var statCard: some View {
@@ -761,7 +783,7 @@ struct LockDetailView: View {
         VStack(spacing: 4) {
             Image(systemName: icon).font(.title3).foregroundStyle(color)
             Text(value).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
-            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(title).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -769,6 +791,7 @@ struct LockDetailView: View {
     private var compactMap: some View {
         Button { showFullMap = true } label: {
             mapView
+                .allowsHitTesting(false)
                 .frame(height: 148)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 .overlay(alignment: .topTrailing) {
@@ -790,6 +813,7 @@ struct LockDetailView: View {
                 }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Kaart vergroten")
     }
 
     @ViewBuilder
@@ -878,7 +902,6 @@ struct LockDetailView: View {
             if !ble.ready { ble.start() }
             return
         }
-        bleStarted = true
         bleKeyError = nil
         var keys: AccessKeys?
         do {
@@ -894,6 +917,7 @@ struct LockDetailView: View {
             bleKeyError = "Geen sleutel gevonden (cloud onbereikbaar en geen offline cache)."
             return
         }
+        bleStarted = true
         ble.configure(keys: k, serial: serial, nameHint: lock.displayName)
         ble.start()
     }

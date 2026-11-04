@@ -25,22 +25,29 @@ struct SettingStepperRow: View {
             HStack {
                 Label(title, systemImage: icon)
                 Spacer()
-                Text(current.map { "\($0) \(unit)" } ?? "–")
+                Text(current.map { "\($0) \(unit)" } ?? "nog niet gelezen")
                     .foregroundStyle(.secondary).monospacedDigit()
             }
             HStack {
-                Stepper(value: Binding(get: { draft }, set: { draft = $0; edited = true }),
+                Stepper(value: Binding(get: { draft }, set: { draft = $0; edited = ($0 != current) }),
                         in: range, step: step) {
                     Text("\(draft) \(unit)").monospacedDigit().font(.callout)
+                        .lineLimit(1).minimumScaleFactor(0.7)
                 }
                 Button("Toepassen") { apply(draft); edited = false }
                     .buttonStyle(.bordered)
-                    .disabled(!enabled || draft == current)
+                    .disabled(!enabled || current == nil || draft == current)
             }
         }
         .padding(.vertical, 2)
-        .onAppear { draft = current ?? range.lowerBound }
-        .onChange(of: current) { v in if let v, !edited { draft = v } }
+        .onAppear { draft = min(max(current ?? range.lowerBound, range.lowerBound), range.upperBound) }
+        .onChange(of: current) { v in
+            if let v, !edited { draft = min(max(v, range.lowerBound), range.upperBound) }
+        }
+        .onChange(of: ble.commandResult) { _ in
+            // After a write (accepted or not) show what the lock really has.
+            if !edited, let c = current { draft = min(max(c, range.lowerBound), range.upperBound) }
+        }
     }
 }
 
@@ -74,6 +81,7 @@ struct SettingToggleRow: View {
             }
         }
         .onChange(of: current) { v in if v != nil, local == v { local = nil } }
+        .onChange(of: ble.reading) { r in if !r { local = nil } }
     }
 }
 

@@ -283,6 +283,7 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func stopTest() { testing = false }
+    func clearCommandResult() { commandResult = nil }
 
     override init() {
         super.init()
