@@ -37,6 +37,17 @@ struct LockDetailView: View {
     @State private var showFirmware = false
     @State private var heroLocked = true
     @State private var didInitialLoad = false
+    @State private var localActs: [LockActivity] = []
+    @State private var lastKnownLock: Bool?
+
+    /// Cloud feed + locally recorded events (cloud is rarely updated now).
+    private var allActivities: [LockActivity] {
+        (activities + localActs).sorted {
+            let d0 = DateUtils.parseAny($0.timestamp) ?? DateUtils.parseISO($0.createdAt) ?? .distantPast
+            let d1 = DateUtils.parseAny($1.timestamp) ?? DateUtils.parseISO($1.createdAt) ?? .distantPast
+            return d0 > d1
+        }
+    }
 
     private var liveLocked: Bool { ble.liveLocked ?? lock.is_locked ?? true }
 
@@ -122,6 +133,7 @@ struct LockDetailView: View {
             // Returning from a pushed settings page must not reload everything.
             if didInitialLoad { await startBLE(); return }
             didInitialLoad = true
+            localActs = LocalActivityLog.load(serial: lock.serial_no)
             LockNotifier.shared.requestAuth()
             heroLocked = ble.liveLocked ?? lock.is_locked ?? true
             loc.start()
@@ -130,7 +142,24 @@ struct LockDetailView: View {
             await syncRecoveryState()
             loadSim()
         }
-        .onChange(of: ble.liveLocked) { v in if let v { heroLocked = v } }
+        .onChange(of: ble.liveLocked) { v in
+            guard let v else { return }
+            heroLocked = v
+            // Record real transitions (not the first state seen after connecting).
+            if let prev = lastKnownLock, prev != v {
+                LocalActivityLog.record(kind: v ? "close" : "open", battery: ble.batteryLevelBLE, serial: lock.serial_no)
+                localActs = LocalActivityLog.load(serial: lock.serial_no)
+            }
+            lastKnownLock = v
+        }
+        .onChange(of: ble.batteryLevelBLE) { b in
+            guard let b else { return }
+            let last = LocalActivityLog.lastTimestamp(kind: "battery", serial: lock.serial_no)
+            if last == nil || Date().timeIntervalSince(last!) > 1800 {
+                LocalActivityLog.record(kind: "battery", battery: b, serial: lock.serial_no)
+                localActs = LocalActivityLog.load(serial: lock.serial_no)
+            }
+        }
         .onChange(of: ble.commandResult) { r in
             // Revert the optimistic flip if the command didn't take.
             switch r {
@@ -181,7 +210,7 @@ struct LockDetailView: View {
             FindLockView(ble: ble, onSiren: { if ble.ready { ble.sirenOn() } else { playSiren() } })
         }
         .sheet(isPresented: $showStats) {
-            StatsView(activities: activities, lockName: lock.displayName)
+            StatsView(activities: allActivities, lockName: lock.displayName)
         }
         .sheet(isPresented: $showSharing) {
             if let serial = lock.serial_no {
@@ -623,7 +652,7 @@ struct LockDetailView: View {
                             .foregroundStyle(.primary)
                         Spacer()
                         if busy && activities.isEmpty { ProgressView() }
-                        else { Text("\(activities.count)").foregroundStyle(.secondary) }
+                        else { Text("\(allActivities.count)").foregroundStyle(.secondary) }
                         Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
                             .foregroundStyle(.tertiary)
                     }
