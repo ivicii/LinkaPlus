@@ -261,10 +261,10 @@ struct SlotSettingsPage: View {
                 Text("Druk op de knop van het slot terwijl je telefoon verbonden is → de app opent het slot (zoals in de officiële app). Werkt alleen als LinkaPlus verbonden is. Standaard uit.")
             }
             Section {
-                SettingToggleRow(title: "LINKA ‘Quick Lock’ (index 102)", icon: "bolt.badge.clock", idx: 102,
+                SettingToggleRow(title: "Auto-lock (index 102)", icon: "bolt.badge.clock", idx: 102,
                                  ble: ble, enabled: connected) { ble.setQuickLock($0) }
             } header: { Text("Geavanceerd") } footer: {
-                Text("De schakelaar die de officiële app ‘Quick Lock’ noemt (20 = aan). Effect op de LEO2 nog onbevestigd.")
+                Text("In de officiële app ‘settings_auto_lock’ (schrijft 20 = aan, 0 = uit; bij teruglezen logt die app ‘Quick Lock checked’). Wat 20 precies betekent (vermoedelijk seconden) is nog onbevestigd. Auto-unlock staat níet in het slot: dat is puur app-logica.")
             }
             Section {
                 stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 600...86400, step: 60) { ble.setLockSleep($0) }
