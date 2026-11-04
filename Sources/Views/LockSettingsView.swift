@@ -110,7 +110,7 @@ struct SlotSettingsPage: View {
     private var indices: [Int] {
         switch kind {
         case .security:    return [1, 106, 7, 37]
-        case .behaviour:   return [102, 12, 55, 17, 30]
+        case .behaviour:   return [55, 11, 12, 102, 17, 30]
         case .sensitivity: return [10, 14, 13, 28, 29, 15, 16]
         case .maintenance: return [5, 45]
         }
@@ -129,7 +129,7 @@ struct SlotSettingsPage: View {
         (2, "Actuaties (totaal)"), (3, "Slotfouten"), (31, "Foute-PAC limiet (idx 31)"),
         (32, "Foute-versleuteling limiet (idx 32)"), (33, "Tamper-bits (idx 33)"),
     ]
-    private static let allIdx = [1, 2, 3, 5, 7, 10, 12, 13, 14, 15, 16, 17, 28, 29, 30, 31, 32, 33, 37, 45, 55, 102, 106]
+    private static let allIdx = [1, 2, 3, 5, 7, 10, 11, 12, 13, 14, 15, 16, 17, 28, 29, 30, 31, 32, 33, 37, 45, 55, 102, 106]
 
     var body: some View {
         List {
@@ -251,6 +251,11 @@ struct SlotSettingsPage: View {
                                  ble: ble, enabled: connected) { ble.setAudio($0) }
             } header: { Text("Knop & geluid") } footer: {
                 Text("Quick-lock: POWER-knop lang indrukken sluit het slot, ook zonder telefoon (index 55).\nMet je telefoon via Bluetooth verbonden opent én sluit lang indrukken altijd (standaardgedrag, getest).")
+            }
+            Section {
+                stepper("Min. signaal telefoon", unit: "-dBm", icon: "wifi", idx: 11, range: 40...100) { ble.setUnlockRSSIMin($0) }
+            } header: { Text("Openen met knop") } footer: {
+                Text("Met je telefoon verbonden opent lang drukken het slot. Dit bepaalt hoe dichtbij je telefoon moet zijn (firmware RSSI_UNLOCK_MIN, index 11): lager getal = dichterbij nodig. ±60 ≈ 1–2 m, ±75 ≈ 5 m, ±90 ≈ 10+ m. Zet hem laag, anders kan iemand anders je slot openen terwijl jij met je telefoon in de buurt bent.")
             }
             Section {
                 Toggle(isOn: Binding(

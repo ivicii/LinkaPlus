@@ -497,6 +497,8 @@ final class BLEController: NSObject, ObservableObject {
     /// Movement notification (official doSetMovementNotification): idx 106 = 5 / 0.
     func setMovementAlarm(_ on: Bool) { put(106, on ? 5 : 0, on ? "Bewegingsmelding aan" : "Bewegingsmelding uit") }
     func setAudio(_ on: Bool)       { put(12, on ? 3 : 0, on ? "Geluid aan" : "Geluid uit") }
+    /// VLSO_SETTING_RSSI_UNLOCK_MIN (idx 11): phone must be at least this strong (-dBm) for a button unlock.
+    func setUnlockRSSIMin(_ v: Int) { put(11, v, "Min. signaal knop-ontgrendeling -\(v) dBm") }
     func setBumpThreshold(_ v: Int) { put(10, v, "Bump-drempel \(v) mg") }
     func setStallCurrent(_ v: Int)  { put(5, v, "Stall-stroom \(v) mA") }
     func setStallDelay(_ v: Int)    { put(45, v, "Stall-vertraging \(v)") }
