@@ -247,12 +247,10 @@ struct SlotSettingsPage: View {
             Section {
                 SettingToggleRow(title: "Quick-lock", icon: "bolt.horizontal", idx: 55,
                                  ble: ble, enabled: connected) { ble.setAllowUnconnLock($0) }
-                SettingToggleRow(title: "Knopbediening via telefoon", icon: "hand.tap", idx: 102,
-                                 ble: ble, enabled: connected) { ble.setQuickLock($0) }
                 SettingToggleRow(title: "Geluid & pieptonen", icon: "speaker.wave.2", idx: 12,
                                  ble: ble, enabled: connected) { ble.setAudio($0) }
             } header: { Text("Knop & geluid") } footer: {
-                Text("Quick-lock: POWER-knop lang indrukken sluit het slot, ook zonder telefoon (index 55).\nKnopbediening via telefoon: POWER-knop lang indrukken opent én sluit, alleen als je telefoon via Bluetooth verbonden is (index 102).")
+                Text("Quick-lock: POWER-knop lang indrukken sluit het slot, ook zonder telefoon (index 55).\nMet je telefoon via Bluetooth verbonden opent én sluit lang indrukken altijd (standaardgedrag, getest).")
             }
             Section {
                 Toggle(isOn: Binding(
@@ -266,6 +264,12 @@ struct SlotSettingsPage: View {
                 }
             } header: { Text("Auto-unlock") } footer: {
                 Text("Slot dicht → je loopt weg (verbinding weg of signaal zwak) → komt terug binnen ±5 m → de app opent het slot één keer. Werkt alleen als LinkaPlus actief verbonden is; op de achtergrond kan iOS het scannen beperken. Standaard uit — een slot dat vanzelf opengaat is minder veilig.")
+            }
+            Section {
+                SettingToggleRow(title: "Auto-lock (index 102)", icon: "bolt.badge.clock", idx: 102,
+                                 ble: ble, enabled: connected) { ble.setQuickLock($0) }
+            } header: { Text("Geavanceerd") } footer: {
+                Text("De officiële app noemt dit ‘Quick Lock’ (schrijft 20 = aan). In jouw test had hij geen effect op lang indrukken; mogelijk 2× kort drukken of automatisch sluiten na 20 s — nog onbevestigd.")
             }
             Section {
                 stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 600...86400, step: 60) { ble.setLockSleep($0) }
