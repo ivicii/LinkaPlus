@@ -8,6 +8,8 @@ final class AppRouter: ObservableObject {
     var wantsLock = false
     /// true = do the opposite of the current lock state.
     var wantsToggle = false
+    /// Bumped when a lock was removed/transferred → the list pops to root and reloads.
+    @Published var lockRemoved = 0
 
     static let pendingKey = "pendingUnlock"
     static let pendingLockKey = "pendingLock"

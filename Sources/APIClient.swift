@@ -238,6 +238,24 @@ struct APIClient {
         _ = try await sendExpectingStatus(req)
     }
 
+    /// Transfer ownership to another LINKA account (official: PUT /api/keys/transfer_ownership).
+    func transferOwnership(email: String, serial: String, auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/transfer_ownership"))
+        req.httpMethod = "PUT"
+        setForm(["email": email, "lock_serial_no": serial], on: &req)
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
+    /// Hide the lock from this account's list (official "Remove device from this phone" for admins).
+    func hideLock(serial: String, auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/hide_lock"))
+        req.httpMethod = "PUT"
+        setForm(["lock_serial_no": serial], on: &req)
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
     func renameLock(name: String, serial: String, isLocked: Bool, lockType: String, auth: Identity) async throws {
         var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/locks"))
         req.httpMethod = "POST"

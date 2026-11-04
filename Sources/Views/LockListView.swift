@@ -65,6 +65,10 @@ struct LockListView: View {
             .onChange(of: router.unlockRequested) { req in
                 if req, let first = locks.first, path.last != first { path = [first] }
             }
+            .onChange(of: router.lockRemoved) { _ in
+                path = []
+                Task { await load() }
+            }
             .onChange(of: locks) { newLocks in
                 if router.unlockRequested, let first = newLocks.first, path.isEmpty { path = [first] }
             }

@@ -664,6 +664,11 @@ struct LockDetailView: View {
             Section("Delen & beheer") {
                 Button { showSharing = true } label: { Label("Delen & toegang", systemImage: "person.2.fill") }
                 Button { renameText = lock.displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
+                if let serial = lock.serial_no {
+                    NavigationLink {
+                        OwnershipView(serial: serial, lockName: lock.displayName)
+                    } label: { Label("Eigendom wijzigen", systemImage: "person.crop.circle.badge.exclamationmark") }
+                }
             }
 
             Section {
