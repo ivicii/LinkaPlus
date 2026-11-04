@@ -9,7 +9,7 @@ enum LinkaCrypto {
     static let staticKeyA: [UInt8] = hex("f985deefecec2df4c79c91e2314b8466")
     static let staticKeyB: [UInt8] = hex("7c235022766280bd6b7a5b99ca9b5a29")
     // Constant nonce used for subkey derivation (pc/g.f).
-    static let subkeyNonce: [UInt8] = [0,0,0,0xb2,0x9c,0x0d,0x53,0xf6,0xca,0xeb,0,0,0,0,0,0]
+    static let subkeyNonce: [UInt8] = [0,0,0,0xb2,0x9c,0x2d,0x53,0xf6,0xca,0xeb,0,0,0,0,0,0]  // pc/g.f: -78,-100,45,83,-10,-54,-21
 
     enum Priv { case admin, user }
 
@@ -89,6 +89,41 @@ enum LinkaCrypto {
         for i in 0..<16 { frame[2 + i] = (i < enc.count) ? enc[i] : 0 }
         applyCRC(&frame)
         return frame
+    }
+
+    /// Command frame encrypted with a MASTER key (pc/g.g with setKey / useMaster):
+    /// the subkey is derived on-device (pc/g.f) from master, the slot field `f`,
+    /// the reversed MAC, privilege and the context encVer. Flag = 0x80 | 0x40 if f==1 | 0x10 if user.
+    static func masterFrame(mac: [UInt8], payload: [UInt8], masterKey: [UInt8], slotF: Int,
+                            priv: Priv, encVer: Int, counter: UInt32) -> [UInt8] {
+        let revMAC = (0..<6).map { mac[5 - $0] }
+        let sub = deriveSubkey(masterKey: masterKey, slot: slotF, revMAC: revMAC, priv: priv, encVer: encVer)
+        var block = [UInt8](repeating: 0, count: 16)
+        block[0] = 0x10
+        for (i, b) in payload.enumerated() where i < 13 { block[1 + i] = b }
+        applyCRC(&block)
+        var iv = [UInt8](repeating: 0, count: 16)
+        for i in 0..<6 { iv[i] = revMAC[i] }
+        iv[6] = UInt8(counter & 0xff); iv[7] = UInt8((counter >> 8) & 0xff)
+        iv[8] = UInt8((counter >> 16) & 0xff); iv[9] = UInt8((counter >> 24) & 0xff)
+        let enc = aesCBC(key: sub, iv: iv, data: block)
+        var frame = [UInt8](repeating: 0, count: 20)
+        frame[0] = 20
+        var flag: UInt8 = 0x80
+        if slotF == 1 { flag |= 0x40 }
+        if priv == .user { flag |= 0x10 }
+        frame[1] = flag
+        for i in 0..<16 { frame[2 + i] = (i < enc.count) ? enc[i] : 0 }
+        applyCRC(&frame)
+        return frame
+    }
+
+    /// pc/g.p — one's-complement of every byte of a hex key (fresh-lock "origin" key).
+    static func invertedKey(_ hexKey: String) -> [UInt8] { hex(hexKey).map { 255 - $0 } }
+
+    /// Master-key half write (pc/i(3, idx, 8 bytes)): [0x03, idx, 8 key bytes, 0,0,0].
+    static func masterKeyPayload(idx: Int, half: [UInt8]) -> [UInt8] {
+        [0x03, UInt8(idx & 0xff)] + half.prefix(8) + [0, 0, 0]
     }
 
     /// Payload for a WRITE-setting packet (pc/i: VCMD_SET_SETTING).

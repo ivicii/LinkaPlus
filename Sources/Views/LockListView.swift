@@ -9,6 +9,7 @@ struct LockListView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var showDiagnostics = false
+    @State private var showAddLock = false
     @State private var offline = false
     @State private var path: [Lock] = []
 
@@ -49,6 +50,10 @@ struct LockListView: View {
                 LockDetailView(lock: lock)
             }
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { showAddLock = true } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Slot toevoegen")
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         if let name = session.displayName { Text(name) }
@@ -71,6 +76,9 @@ struct LockListView: View {
             }
             .onChange(of: locks) { newLocks in
                 if router.unlockRequested, let first = newLocks.first, path.isEmpty { path = [first] }
+            }
+            .sheet(isPresented: $showAddLock) {
+                AddLockView(onDone: { Task { await load() } }).environmentObject(session)
             }
             .sheet(isPresented: $showDiagnostics) {
                 DiagnosticsView().environmentObject(session)

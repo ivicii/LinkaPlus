@@ -265,6 +265,45 @@ struct APIClient {
         _ = try await sendExpectingStatus(req)
     }
 
+    // MARK: Pairing (official LinkaAccessKey flow)
+
+    /// POST /api/locks (upsert_lock) — register the lock object.
+    func upsertLock(name: String, serial: String, auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/locks"))
+        req.httpMethod = "POST"
+        setForm(["name": name, "serial_no": serial, "is_locked": "false", "lock_type": "leo2"], on: &req)
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
+    /// PUT /api/keys/gen_master_key — server mints the master keys to install.
+    func genMasterKey(serial: String, auth: Identity) async throws -> GenMasterKey {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/gen_master_key"))
+        req.httpMethod = "PUT"
+        setForm(["lock_serial_no": serial], on: &req)
+        authorize(&req, auth: auth)
+        return try await decodeObject(req, as: GenMasterKey.self)
+    }
+
+    /// PUT /api/keys/register_lock_with_master_keys — returns the per-user keys.
+    func registerLockWithMasterKeys(serial: String, master: String, master2: String, auth: Identity) async throws -> AccessKeys {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/register_lock_with_master_keys"))
+        req.httpMethod = "PUT"
+        setForm(["lock_serial_no": serial, "access_key_master": master, "access_key_master_2": master2,
+                 "device_token": auth.deviceToken, "device_app_name": "iOS"], on: &req)
+        authorize(&req, auth: auth)
+        return try await decodeObject(req, as: AccessKeys.self)
+    }
+
+    /// PUT /api/keys/request_for_user_permission_v2 — ask the owner for access.
+    func requestUserPermission(serial: String, auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/request_for_user_permission_v2"))
+        req.httpMethod = "PUT"
+        setForm(["lock_serial_no": serial], on: &req)
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
     func renameLock(name: String, serial: String, isLocked: Bool, lockType: String, auth: Identity) async throws {
         var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/locks"))
         req.httpMethod = "POST"

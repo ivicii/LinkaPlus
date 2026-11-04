@@ -107,6 +107,14 @@ extension Lock {
 
 // MARK: - Access keys (for BLE command encryption)
 
+/// gen_master_key response: two new keys to install + the key the lock accepts now.
+struct GenMasterKey: Codable {
+    let access_key_master: String?
+    let access_key_master_2: String?
+    let access_key_origin: String?
+    let access_key_origin_v2: String?
+}
+
 struct KeyStatus: Decodable {
     let ownsKey: Bool?
     let isOwner: Bool?
