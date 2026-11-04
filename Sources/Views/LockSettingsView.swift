@@ -250,7 +250,7 @@ struct SlotSettingsPage: View {
                 SettingToggleRow(title: "Geluid & pieptonen", icon: "speaker.wave.2", idx: 12,
                                  ble: ble, enabled: connected) { ble.setAudio($0) }
             } header: { Text("Knop & geluid") } footer: {
-                Text("Quick-lock: POWER-knop lang indrukken sluit het slot, ook zonder telefoon (index 55).\nMet je telefoon via Bluetooth verbonden opent én sluit lang indrukken altijd (standaardgedrag, getest).")
+                Text("Quick-lock: knop 1,5 s ingedrukt houden sluit het slot, ook zonder telefoon (index 55, volgens LINKA-documentatie).\nMet je telefoon verbonden opent én sluit dezelfde knop. 4 s vasthouden (LED paars) = PAC-code invoeren.")
             }
             Section {
                 stepper("Min. signaal telefoon", unit: "-dBm", icon: "wifi", idx: 11, range: 40...100) { ble.setUnlockRSSIMin($0) }
@@ -271,10 +271,10 @@ struct SlotSettingsPage: View {
                 Text("Slot dicht → je loopt weg (verbinding weg of signaal zwak) → komt terug binnen ±5 m → de app opent het slot één keer. Werkt alleen als LinkaPlus actief verbonden is; op de achtergrond kan iOS het scannen beperken. Standaard uit — een slot dat vanzelf opengaat is minder veilig.")
             }
             Section {
-                SettingToggleRow(title: "Auto-lock (index 102)", icon: "bolt.badge.clock", idx: 102,
+                SettingToggleRow(title: "Autolock", icon: "lock.badge.clock", idx: 102,
                                  ble: ble, enabled: connected) { ble.setQuickLock($0) }
-            } header: { Text("Geavanceerd") } footer: {
-                Text("De officiële app noemt dit ‘Quick Lock’ (schrijft 20 = aan). In jouw test had hij geen effect op lang indrukken; mogelijk 2× kort drukken of automatisch sluiten na 20 s — nog onbevestigd.")
+            } header: { Text("Autolock") } footer: {
+                Text("Volgens de LINKA-documentatie: het slot sluit zichzelf na een periode zonder beweging (index 102; de officiële app schrijft 20 = aan). Werkt alleen als de beugel vrij kan sluiten — laat hem uit als je je fiets vaak even open laat staan.")
             }
             Section {
                 stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 600...86400, step: 60) { ble.setLockSleep($0) }
