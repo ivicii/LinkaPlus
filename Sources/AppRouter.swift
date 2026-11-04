@@ -6,12 +6,16 @@ final class AppRouter: ObservableObject {
     @Published var unlockRequested = false
     /// true = the pending action is LOCK, false = UNLOCK.
     var wantsLock = false
+    /// true = do the opposite of the current lock state.
+    var wantsToggle = false
 
     static let pendingKey = "pendingUnlock"
     static let pendingLockKey = "pendingLock"
+    static let pendingToggleKey = "pendingToggle"
 
-    func requestUnlock() { wantsLock = false; unlockRequested = true }
-    func requestLock()   { wantsLock = true;  unlockRequested = true }
+    func requestUnlock() { wantsToggle = false; wantsLock = false; unlockRequested = true }
+    func requestLock()   { wantsToggle = false; wantsLock = true;  unlockRequested = true }
+    func requestToggle() { wantsToggle = true; unlockRequested = true }
 
     /// Consume a flag set by an App Intent that launched the app.
     func consumePendingFlag() {
@@ -20,6 +24,8 @@ final class AppRouter: ObservableObject {
             d.set(false, forKey: Self.pendingKey); requestUnlock()
         } else if d.bool(forKey: Self.pendingLockKey) {
             d.set(false, forKey: Self.pendingLockKey); requestLock()
+        } else if d.bool(forKey: Self.pendingToggleKey) {
+            d.set(false, forKey: Self.pendingToggleKey); requestToggle()
         }
     }
 }

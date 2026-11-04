@@ -29,9 +29,32 @@ struct LockLockIntent: AppIntent {
     }
 }
 
+/// Action button: unlock when locked, lock when unlocked.
+@available(iOS 16.0, *)
+struct ToggleLockIntent: AppIntent {
+    static var title: LocalizedStringResource = "Ontgrendel/vergrendel slot"
+    static var description = IntentDescription("Opent je LINKA-slot als het dicht is en sluit het als het open is.")
+    static var openAppWhenRun = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        UserDefaults.standard.set(true, forKey: AppRouter.pendingToggleKey)
+        return .result()
+    }
+}
+
 @available(iOS 16.0, *)
 struct LinkaShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: ToggleLockIntent(),
+            phrases: [
+                "Wissel mijn slot met \(.applicationName)",
+                "Ontgrendel of vergrendel mijn slot met \(.applicationName)"
+            ],
+            shortTitle: "Ontgrendel/vergrendel",
+            systemImageName: "lock.rotation"
+        )
         AppShortcut(
             intent: UnlockLockIntent(),
             phrases: [

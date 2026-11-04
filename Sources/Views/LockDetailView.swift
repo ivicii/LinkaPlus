@@ -152,6 +152,7 @@ struct LockDetailView: View {
                 localActs = LocalActivityLog.load(serial: lock.serial_no)
             }
             lastKnownLock = v
+            maybeAutoUnlock()
         }
         .onChange(of: ble.batteryLevelBLE) { b in
             guard let b else { return }
@@ -941,9 +942,16 @@ struct LockDetailView: View {
     /// soon as we have a live context counter from the lock.
     private func maybeAutoUnlock() {
         guard router.unlockRequested, ble.ready, ble.ctxCounter != nil else { return }
+        var lockIt = router.wantsLock
+        if router.wantsToggle {
+            // Wait until the lock has reported its real state (status frame).
+            guard let state = ble.liveLocked else { return }
+            lockIt = !state
+        }
         router.unlockRequested = false
+        router.wantsToggle = false
         ble.channel = 0; ble.counterOffset = 0
-        if router.wantsLock { ble.lock() } else { ble.unlock() }
+        if lockIt { ble.lock() } else { ble.unlock() }
         Haptic.success()
     }
 

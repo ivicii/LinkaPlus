@@ -15,6 +15,7 @@ struct LinkaPlusApp: App {
                     guard url.scheme == "linkaplus" else { return }
                     if url.host == "unlock" { router.requestUnlock() }
                     if url.host == "lock" { router.requestLock() }
+                    if url.host == "toggle" { router.requestToggle() }
                 }
                 .onChange(of: scenePhase) { phase in
                     if phase == .active { router.consumePendingFlag() }
