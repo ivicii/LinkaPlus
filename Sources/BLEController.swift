@@ -31,6 +31,10 @@ final class BLEController: NSObject, ObservableObject {
     // Setting values read back from the lock (GET_SETTING, opcode 4 — the reply
     // is a plaintext type-3/4 frame: value = bytes[3..6] LE32).
     @Published private(set) var settingValues: [Int: Int] = [:]
+    @Published private(set) var settingValues2: [Int: Int] = [:]
+    /// Cellular info the lock pushes (type 0x1A): operator name and CSQ (0–31).
+    @Published private(set) var netOperator: String?
+    @Published private(set) var netCSQ: Int?
     @Published private(set) var reading = false
     @Published private(set) var readFrames: [String] = []
     @Published private(set) var lastReadLabel: String?
@@ -142,12 +146,30 @@ final class BLEController: NSObject, ObservableObject {
         }
     }
 
+    /// Setting reply, e.g. `11 04 05 00000000 f4010000 673e6d2e 87de` (17 bytes):
+    /// [0]=length, [1]=type 3/4, [2]=idx, [3..6]=value, [7..10]=value2,
+    /// [11..14]=next counter, CRC. Byte[0] is the frame LENGTH, not always 0x14.
     private func parseSettingReply(_ d: [UInt8]) {
-        guard d.count >= 7, d[0] == 0x14, d[1] == 0x03 || d[1] == 0x04 else { return }
+        guard d.count >= 11, Int(d[0]) == d.count, d[1] == 0x03 || d[1] == 0x04, crcOK(d) else { return }
         let raw = UInt32(d[3]) | (UInt32(d[4]) << 8) | (UInt32(d[5]) << 16) | (UInt32(d[6]) << 24)
+        let raw2 = UInt32(d[7]) | (UInt32(d[8]) << 8) | (UInt32(d[9]) << 16) | (UInt32(d[10]) << 24)
         let idx = Int(d[2])
         settingValues[idx] = Int(Int32(bitPattern: raw))
+        settingValues2[idx] = Int(Int32(bitPattern: raw2))
         if pendingReadIdx == nil || pendingReadIdx == idx { replyReceived = true }
+    }
+
+    /// Modem info (type 0x1A): sub 4 = operator name (ASCII from [4]), sub 3 = CSQ at [4].
+    private func parseModemInfo(_ d: [UInt8]) {
+        guard d.count >= 6, Int(d[0]) == d.count, d[1] == 0x1A, crcOK(d) else { return }
+        switch d[2] {
+        case 4:
+            let bytes = d[4..<(d.count - 2)].prefix { $0 != 0 }
+            if let s = String(bytes: bytes, encoding: .ascii), !s.isEmpty { netOperator = s }
+        case 3:
+            let v = Int(d[4]); if v <= 31 { netCSQ = v }
+        default: break
+        }
     }
 
     /// CRC-16 (big-endian in the last two bytes) as pc.f.d verifies it.
@@ -161,7 +183,7 @@ final class BLEController: NSObject, ObservableObject {
     /// and ACK/NAK frames (bytes 7..10), not only from 0x12 context frames.
     /// Only CRC-valid frames are trusted. NAK/ACK also release a waiting read.
     private func updateCounterFromReply(_ d: [UInt8]) {
-        guard d.count >= 12, d[0] == 0x14, crcOK(d) else { return }
+        guard d.count >= 12, Int(d[0]) == d.count, crcOK(d) else { return }
         func le32(_ i: Int) -> UInt32 {
             UInt32(d[i]) | (UInt32(d[i+1]) << 8) | (UInt32(d[i+2]) << 16) | (UInt32(d[i+3]) << 24)
         }
@@ -633,10 +655,11 @@ extension BLEController: CBPeripheralDelegate {
             // Decode live telemetry: 0x0A motion/info packet, 0x02 status frame.
             parseInfoPacket(data)
             parseSettingReply(data)
+            parseModemInfo(data)
             updateCounterFromReply(data)
             parseStatusFrame(data)
             // The command context is the 0x12-prefixed frame (encVer 2).
-            if data.count >= 7, data[0] == 0x12 {
+            if data.count >= 7, data[0] == 0x12, data[1] == 0x0B, crcOK(data) {
                 ctxEncVer = Int(data[2])
                 ctxCounter = UInt32(data[3]) | (UInt32(data[4]) << 8) | (UInt32(data[5]) << 16) | (UInt32(data[6]) << 24)
                 add("CONTEXT: encVer \(ctxEncVer!), teller \(ctxCounter!)  [\(LinkaCrypto.toHex(data))]")

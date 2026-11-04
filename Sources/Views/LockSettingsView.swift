@@ -305,7 +305,7 @@ struct SlotSettingsPage: View {
                 if !ble.settingValues.isEmpty {
                     Button {
                         UIPasteboard.general.string = ble.settingValues.sorted { $0.key < $1.key }
-                            .map { "idx \($0.key) = \($0.value)" }.joined(separator: "\n")
+                            .map { "idx \($0.key) = \($0.value)  (v2 \(ble.settingValues2[$0.key] ?? 0))" }.joined(separator: "\n")
                         Haptic.tap(.light); copied = true
                     } label: {
                         Label(copied ? "Gekopieerd ✓" : "Kopieer alle waarden", systemImage: copied ? "checkmark" : "doc.on.doc")

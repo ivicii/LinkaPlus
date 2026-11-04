@@ -519,6 +519,10 @@ struct LockDetailView: View {
             if let r = ble.infoRSSIpkt {
                 statusRow("Signaal (pakket)", value: "\(r) dBm", systemImage: "antenna.radiowaves.left.and.right")
             }
+            if let op = ble.netOperator {
+                statusRow("Mobiel netwerk", value: op + (ble.netCSQ.map { " · \($0)/31" } ?? ""),
+                          systemImage: "antenna.radiowaves.left.and.right")
+            }
             if let v = ble.batteryVoltageBLE {
                 statusRow("Accuspanning", value: String(format: "%.2f V", v), systemImage: "bolt.fill")
             }
@@ -526,7 +530,7 @@ struct LockDetailView: View {
                 statusRow("Slotstand (ruw uit frame)", value: ls, systemImage: "lock.square")
             }
             if let t = ble.infoTempC {
-                statusRow("Temperatuur (≈)", value: "\(t) °C", systemImage: "thermometer.medium")
+                statusRow("Temperatuur", value: "\(t) °C", systemImage: "thermometer.medium")
             }
             if let e = ble.infoExtra {
                 statusRow("Extra (ongelabeld)", value: "\(e)", systemImage: "number")
