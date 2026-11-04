@@ -1,18 +1,25 @@
 import SwiftUI
 
-/// App-wide router for deep links / intents, e.g. "unlock the lock now".
+/// App-wide router for deep links / intents / widgets: "open" or "close" the lock now.
 final class AppRouter: ObservableObject {
+    /// An action is pending (kept under this name so existing observers still work).
     @Published var unlockRequested = false
+    /// true = the pending action is LOCK, false = UNLOCK.
+    var wantsLock = false
 
     static let pendingKey = "pendingUnlock"
+    static let pendingLockKey = "pendingLock"
 
-    func requestUnlock() { unlockRequested = true }
+    func requestUnlock() { wantsLock = false; unlockRequested = true }
+    func requestLock()   { wantsLock = true;  unlockRequested = true }
 
     /// Consume a flag set by an App Intent that launched the app.
     func consumePendingFlag() {
-        if UserDefaults.standard.bool(forKey: Self.pendingKey) {
-            UserDefaults.standard.set(false, forKey: Self.pendingKey)
-            unlockRequested = true
+        let d = UserDefaults.standard
+        if d.bool(forKey: Self.pendingKey) {
+            d.set(false, forKey: Self.pendingKey); requestUnlock()
+        } else if d.bool(forKey: Self.pendingLockKey) {
+            d.set(false, forKey: Self.pendingLockKey); requestLock()
         }
     }
 }

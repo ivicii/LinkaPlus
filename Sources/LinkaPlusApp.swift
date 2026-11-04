@@ -12,9 +12,9 @@ struct LinkaPlusApp: App {
                 .environmentObject(session)
                 .environmentObject(router)
                 .onOpenURL { url in
-                    if url.scheme == "linkaplus" && url.host == "unlock" {
-                        router.requestUnlock()
-                    }
+                    guard url.scheme == "linkaplus" else { return }
+                    if url.host == "unlock" { router.requestUnlock() }
+                    if url.host == "lock" { router.requestLock() }
                 }
                 .onChange(of: scenePhase) { phase in
                     if phase == .active { router.consumePendingFlag() }

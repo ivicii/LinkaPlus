@@ -15,6 +15,20 @@ struct UnlockLockIntent: AppIntent {
     }
 }
 
+/// Shortcuts / Action-button / Siri action to lock the lock.
+@available(iOS 16.0, *)
+struct LockLockIntent: AppIntent {
+    static var title: LocalizedStringResource = "Vergrendel slot"
+    static var description = IntentDescription("Vergrendelt je LINKA-slot via Bluetooth.")
+    static var openAppWhenRun = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        UserDefaults.standard.set(true, forKey: AppRouter.pendingLockKey)
+        return .result()
+    }
+}
+
 @available(iOS 16.0, *)
 struct LinkaShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
@@ -26,6 +40,15 @@ struct LinkaShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Ontgrendel slot",
             systemImageName: "lock.open.fill"
+        )
+        AppShortcut(
+            intent: LockLockIntent(),
+            phrases: [
+                "Vergrendel mijn slot met \(.applicationName)",
+                "Sluit mijn slot met \(.applicationName)"
+            ],
+            shortTitle: "Vergrendel slot",
+            systemImageName: "lock.fill"
         )
     }
 }

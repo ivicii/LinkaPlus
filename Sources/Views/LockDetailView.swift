@@ -940,10 +940,10 @@ struct LockDetailView: View {
     /// Triggered by the Action button / widget / Shortcut deep link: unlock as
     /// soon as we have a live context counter from the lock.
     private func maybeAutoUnlock() {
-        guard router.unlockRequested, ble.ctxCounter != nil else { return }
+        guard router.unlockRequested, ble.ready, ble.ctxCounter != nil else { return }
         router.unlockRequested = false
         ble.channel = 0; ble.counterOffset = 0
-        ble.unlock()
+        if router.wantsLock { ble.lock() } else { ble.unlock() }
         Haptic.success()
     }
 
