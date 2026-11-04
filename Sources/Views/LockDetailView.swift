@@ -828,6 +828,7 @@ struct LockDetailView: View {
                     Label("Openen", systemImage: "lock.open.fill").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).tint(Theme.open)
+                .disabled(knownLocked == false)   // already open
                 Button {
                     Haptic.tap(.light); heroLocked = true
                     ble.channel = 0; ble.counterOffset = 0; ble.lock()
@@ -835,6 +836,7 @@ struct LockDetailView: View {
                     Label("Sluiten", systemImage: "lock.fill").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).tint(Theme.locked)
+                .disabled(knownLocked == true)    // already locked
             }
             .controlSize(.large)
             .disabled(!ble.ready)

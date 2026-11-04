@@ -315,6 +315,13 @@ struct SlotSettingsPage: View {
                 Text("Actuaties en veiligheidstellers (foute PAC- en versleutelingspogingen) rechtstreeks uit het slot.")
             }
 
+            Section {
+                Button {
+                    UIPasteboard.general.string = ble.fullLog()
+                    Haptic.tap(.light)
+                } label: { Label("Kopieer volledige log", systemImage: "doc.on.doc") }
+            } footer: { Text("Plak de log in de chat als iets niet werkt (bijv. instellingen lezen).") }
+
             if !ble.readFrames.isEmpty {
                 Section("Laatste frames (diagnose)") {
                     ForEach(Array(ble.readFrames.suffix(8).enumerated()), id: \.offset) { _, f in

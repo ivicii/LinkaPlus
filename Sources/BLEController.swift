@@ -52,6 +52,7 @@ final class BLEController: NSObject, ObservableObject {
     /// Lock state read from the status frame (byte[2]); nil until a frame arrives.
     @Published private(set) var lockStateText: String?
     private var prevFlagSet: Set<String> = []
+    private var selfSirenUntil = Date.distantPast
 
     /// Flags that warrant a push notification, with their notification text.
     private static let notifyFlags: [String: (String, String)] = [
@@ -105,6 +106,12 @@ final class BLEController: NSObject, ObservableObject {
         // validated against a physical lock/unlock, so it does NOT drive liveLocked
         // (which stays authoritative from motor events + user actions).
         // rc/b mapping (confirmed from APK packed-switch 0..8):
+        // Like the official app (Linka.updateFromStatusData): 3/7 = locked, 4/8 = unlocked.
+        switch Int(d[2]) {
+        case 3, 7: liveLocked = true
+        case 4, 8: liveLocked = false
+        default: break
+        }
         switch Int(d[2]) {
         case 0: lockStateText = "Opstarten"
         case 1: lockStateText = "Vergrendelen…"
@@ -126,6 +133,7 @@ final class BLEController: NSObject, ObservableObject {
             // Notify on the rising edge of any critical flag.
             let now = Set(active)
             for flag in now.subtracting(prevFlagSet) {
+                if flag == "Sirene actief", Date() < selfSirenUntil { continue }   // started by this app
                 if let (title, body) = Self.notifyFlags[flag] {
                     LockNotifier.shared.notify(title: title, body: body, id: flag)
                 }
@@ -440,7 +448,7 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     // MARK: Commands (opcodes from the firmware command map)
-    func sirenOn()         { sendPayload([14, 60], name: "Sirene") }
+    func sirenOn()         { selfSirenUntil = Date().addingTimeInterval(75); sendPayload([14, 60], name: "Sirene") }
     func sirenOff()        { sendPayload([20, 0], name: "Sirene uit") }
     func reboot()          { sendPayload([31, 0], name: "Herstart") }
     func sleepLock()       { sendPayload([9, 0],  name: "Slaapstand") }
@@ -460,19 +468,13 @@ final class BLEController: NSObject, ObservableObject {
         Task {
             for idx in idxs {
                 guard ready else { break }
-                var waited = 0
-                while ctxCounter == lastUsedCounter && waited < 12 {
-                    try? await Task.sleep(nanoseconds: 250_000_000); waited += 1
-                }
-                guard ready else { break }
-                if ctxCounter == lastUsedCounter { add("Teller niet ververst — lezen gestopt."); break }
                 pendingReadIdx = idx
                 replyReceived = false
                 awaitingRead = "Param \(idx)"
                 lastReadLabel = "Param \(idx)"
                 sendPayload(LinkaCrypto.readPayload(idx: idx), name: "Lees param \(idx)", quiet: true)
                 var t = 0
-                while !replyReceived && t < 8 { try? await Task.sleep(nanoseconds: 250_000_000); t += 1 }
+                while !replyReceived && t < 16 { try? await Task.sleep(nanoseconds: 250_000_000); t += 1 }
                 awaitingRead = nil
                 pendingReadIdx = nil
             }
@@ -485,7 +487,7 @@ final class BLEController: NSObject, ObservableObject {
     var lockPAC: Int? { settingValues[1] }
     var actuations: Int? { settingValues[2] }
 
-    private func sendPayload(_ payload: [UInt8], name: String, expectActuation: Bool = false, quiet: Bool = false, onSuccess: (() -> Void)? = nil) {
+    private func sendPayload(_ payload: [UInt8], name: String, expectActuation: Bool = false, quiet: Bool = false, retry: Int = 0, onSuccess: (() -> Void)? = nil) {
         let ch = (channel == 1) ? write0016 : write0002
         guard let ch = ch else { add("Geen write-characteristic."); return }
         guard let c = ctxCounter else { add("Nog geen context-teller (wacht op 0x12-frame)."); return }
@@ -494,7 +496,16 @@ final class BLEController: NSObject, ObservableObject {
         // reject the command as "Bad enc" and increments its bad-enc counter, so
         // refuse rather than send a stale frame — wait for a fresh 0x12 context.
         if useCounter == lastUsedCounter {
-            add("Zelfde context-teller als vorige — wacht op vers 0x12-frame.")
+            // Wait (up to ~2 s) for the lock to hand out a fresh counter, then retry.
+            if retry < 8 {
+                Task {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    sendPayload(payload, name: name, expectActuation: expectActuation, quiet: quiet,
+                                retry: retry + 1, onSuccess: onSuccess)
+                }
+                return
+            }
+            add("Geen verse context-teller van het slot ontvangen — \(name) niet verstuurd.")
             if !quiet { commandResult = .timeout }
             return
         }
@@ -641,7 +652,8 @@ extension BLEController: CBPeripheralDelegate {
                 handleEvent(s)
                 add("· \(s)")
             } else {
-                if let label = awaitingRead {
+                if awaitingRead != nil || (data.count > 1 && data[1] != 0x0A && data[1] != 0x02) {
+                    let label = awaitingRead ?? "frame"
                     // Capture EVERY frame in the window; the value frame may be
                     // the 2nd notification after the ack.
                     let hex = LinkaCrypto.toHex(data)
