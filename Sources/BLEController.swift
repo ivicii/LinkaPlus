@@ -433,7 +433,12 @@ final class BLEController: NSObject, ObservableObject {
         Task { try? await Task.sleep(nanoseconds: 1_200_000_000); readSettings([idx]) }
     }
 
-    func setQuickLock(_ on: Bool)   { put(55, on ? 1 : 0, on ? "Quick-lock aan" : "Quick-lock uit") }
+    /// Quick Lock as the official app does it (LockController.doSetAutolock): idx 102 = 20 / 0.
+    func setQuickLock(_ on: Bool)   { put(102, on ? 20 : 0, on ? "Quick-lock aan" : "Quick-lock uit") }
+    /// VLSO_SETTING_ALLOW_UNCONN_LOCK (idx 55): allow locking without a connected phone.
+    func setAllowUnconnLock(_ on: Bool) { put(55, on ? 1 : 0, on ? "Sluiten zonder verbinding aan" : "Sluiten zonder verbinding uit") }
+    /// Movement notification (official doSetMovementNotification): idx 106 = 5 / 0.
+    func setMovementAlarm(_ on: Bool) { put(106, on ? 5 : 0, on ? "Bewegingsmelding aan" : "Bewegingsmelding uit") }
     func setAudio(_ on: Bool)       { put(12, on ? 3 : 0, on ? "Geluid aan" : "Geluid uit") }
     func setBumpThreshold(_ v: Int) { put(10, v, "Bump-drempel \(v) mg") }
     func setStallCurrent(_ v: Int)  { put(5, v, "Stall-stroom \(v) mA") }

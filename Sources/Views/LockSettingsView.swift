@@ -109,8 +109,8 @@ struct SlotSettingsPage: View {
     /// Which parameters this page shows (read automatically when it opens).
     private var indices: [Int] {
         switch kind {
-        case .security:    return [1, 7, 37]
-        case .behaviour:   return [55, 12, 17, 30]
+        case .security:    return [1, 106, 7, 37]
+        case .behaviour:   return [102, 12, 55, 17, 30]
         case .sensitivity: return [10, 14, 13, 28, 29, 15, 16]
         case .maintenance: return [5, 45]
         }
@@ -129,7 +129,7 @@ struct SlotSettingsPage: View {
         (2, "Actuaties (totaal)"), (3, "Slotfouten"), (31, "Foute-PAC limiet (idx 31)"),
         (32, "Foute-versleuteling limiet (idx 32)"), (33, "Tamper-bits (idx 33)"),
     ]
-    private static let allIdx = [1, 2, 3, 5, 7, 10, 12, 13, 14, 15, 16, 17, 28, 29, 30, 31, 32, 33, 37, 45, 55]
+    private static let allIdx = [1, 2, 3, 5, 7, 10, 12, 13, 14, 15, 16, 17, 28, 29, 30, 31, 32, 33, 37, 45, 55, 102, 106]
 
     var body: some View {
         List {
@@ -231,6 +231,12 @@ struct SlotSettingsPage: View {
                 Text("De tapcode om het slot zonder telefoon te openen. De app leest hem rechtstreeks uit het slot (GET_SETTING).")
             }
             Section {
+                SettingToggleRow(title: "Bewegingsmelding", icon: "bell.badge", idx: 106,
+                                 ble: ble, enabled: connected) { ble.setMovementAlarm($0) }
+            } footer: {
+                Text("Het slot meldt beweging terwijl het dicht is (officiële instelling, index 106).")
+            }
+            Section {
                 stepper("Alarm-vertraging", unit: "s", icon: "timer", idx: 7, range: 0...60) { ble.setAlarmDelay($0) }
                 stepper("Alarm-duur (experimenteel)", unit: "s", icon: "alarm", idx: 37, range: 0...255) { ble.setAlarmTime($0) }
             } header: { Text("Alarm") } footer: {
@@ -239,12 +245,18 @@ struct SlotSettingsPage: View {
 
         case .behaviour:
             Section {
-                SettingToggleRow(title: "Quick-lock", icon: "bolt.horizontal", idx: 55,
+                SettingToggleRow(title: "Quick-lock", icon: "bolt.horizontal", idx: 102,
                                  ble: ble, enabled: connected) { ble.setQuickLock($0) }
                 SettingToggleRow(title: "Geluid & pieptonen", icon: "speaker.wave.2", idx: 12,
                                  ble: ble, enabled: connected) { ble.setAudio($0) }
             } header: { Text("Slot") } footer: {
-                Text("Quick-lock: sluit het slot zónder telefoon door 2× op de POWER-knop van het slot te drukken (volgens de officiële app). Het commando wordt na het schrijven teruggelezen, zodat je ziet of het slot de instelling echt heeft overgenomen.")
+                Text("Quick-lock: sluit het slot door 2× op de POWER-knop te drukken (zelfde instelling als de officiële app, index 102). Na schrijven wordt teruggelezen of het slot hem heeft overgenomen.")
+            }
+            Section {
+                SettingToggleRow(title: "Sluiten zonder verbinding", icon: "lock.badge.clock", idx: 55,
+                                 ble: ble, enabled: connected) { ble.setAllowUnconnLock($0) }
+            } footer: {
+                Text("Firmware-instelling ALLOW_UNCONN_LOCK (index 55): of het slot ook mag sluiten als er geen telefoon verbonden is.")
             }
             Section {
                 stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 600...86400, step: 60) { ble.setLockSleep($0) }
