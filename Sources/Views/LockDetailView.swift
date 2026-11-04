@@ -182,12 +182,6 @@ struct LockDetailView: View {
             await syncRecoveryState()
             loadSim()
         }
-        .alert("Tracking-/recovery-modus aanzetten?", isPresented: $confirmEnable) {
-            Button("Annuleer", role: .cancel) {}
-            Button("Aanzetten", role: .destructive) { setRecovery(true) }
-        } message: {
-            Text("Dit is de anti-diefstalstand. Je slot gaat continu zijn GPS-positie doorsturen (meer batterij- en dataverbruik). Je kunt het weer uitzetten.")
-        }
         .sheet(isPresented: $showFullMap) { fullMapSheet }
         .sheet(isPresented: $showFirmware) {
             FirmwareView(ble: ble).environmentObject(session)
@@ -217,13 +211,6 @@ struct LockDetailView: View {
             if let serial = lock.serial_no {
                 SharingView(serial: serial).environmentObject(session)
             }
-        }
-        .alert("Slot hernoemen", isPresented: $showRename) {
-            TextField("Naam", text: $renameText)
-            Button("Annuleer", role: .cancel) {}
-            Button("Opslaan") { renameLock() }
-        } message: {
-            Text("Nieuwe naam voor dit slot (in de cloud).")
         }
     }
 
@@ -649,6 +636,12 @@ struct LockDetailView: View {
                 NavigationLink {
                     List { trackingSection }
                         .navigationTitle("Tracking").navigationBarTitleDisplayMode(.inline)
+                .alert("Tracking-/recovery-modus aanzetten?", isPresented: $confirmEnable) {
+                    Button("Annuleer", role: .cancel) {}
+                    Button("Aanzetten", role: .destructive) { setRecovery(true) }
+                } message: {
+                    Text("Dit is de anti-diefstalstand. Je slot gaat continu zijn GPS-positie doorsturen (meer batterij- en dataverbruik). Je kunt het weer uitzetten.")
+                }
                 } label: { Label("Tracking & recovery", systemImage: "dot.radiowaves.left.and.right") }
                 NavigationLink {
                     List { dataplanSection }
@@ -693,6 +686,13 @@ struct LockDetailView: View {
         }
         .navigationTitle("Instellingen")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Slot hernoemen", isPresented: $showRename) {
+            TextField("Naam", text: $renameText)
+            Button("Annuleer", role: .cancel) {}
+            Button("Opslaan") { renameLock() }
+        } message: {
+            Text("Nieuwe naam voor dit slot (in de cloud).")
+        }
     }
 
     private var advancedPage: some View {
