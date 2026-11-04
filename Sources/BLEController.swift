@@ -615,6 +615,35 @@ final class BLEController: NSObject, ObservableObject {
         }
     }
 
+    /// Read one setting and wait for the answer.
+    func readValue(_ idx: Int, timeout: Double = 8) async -> Int? {
+        settingValues[idx] = nil
+        let deadline = Date().addingTimeInterval(timeout)
+        while reading && Date() < deadline { try? await Task.sleep(nanoseconds: 200_000_000) }
+        readSettings([idx])
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        while (reading || settingValues[idx] == nil) && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        return settingValues[idx]
+    }
+
+    /// Lock side of the official "Remove device from account" (RevocationControllerV2):
+    /// marker idx 13 = 101 → read back → default settings (cmd 12) → idx 13 must be 5.
+    /// Keys in the lock are NOT changed. Returns a step description on failure.
+    func factoryResetForRemoval(progress: @escaping (String) -> Void) async -> String? {
+        guard ready else { return "Niet verbonden met het slot." }
+        progress("Verbinding bevestigen…")
+        sendPayload(LinkaCrypto.settingPayload(idx: 13, value: 101), name: "Reset-markering")
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        guard await readValue(13) == 101 else { return "Slot bevestigde de reset-markering niet." }
+        progress("Standaardinstellingen herstellen…")
+        defaultSettings()
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        guard await readValue(13, timeout: 10) == 5 else { return "Slot bevestigde de standaardinstellingen niet." }
+        return nil
+    }
+
     func readPAC()        { readSettings([1]) }
     func readActuations() { readSettings([2]) }
     var lockPAC: Int? { settingValues[1] }

@@ -256,6 +256,15 @@ struct APIClient {
         _ = try await sendExpectingStatus(req)
     }
 
+    /// Remove the lock from the account on the server (official RevocationControllerV2.d()).
+    func resetAllLockInformation(serial: String, auth: Identity) async throws {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/keys/reset_all_lock_information_and_keys"))
+        req.httpMethod = "PUT"
+        setForm(["lock_serial_no": serial, "device_token": auth.deviceToken, "api_version": "1"], on: &req)
+        authorize(&req, auth: auth)
+        _ = try await sendExpectingStatus(req)
+    }
+
     func renameLock(name: String, serial: String, isLocked: Bool, lockType: String, auth: Identity) async throws {
         var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/locks"))
         req.httpMethod = "POST"

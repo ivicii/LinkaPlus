@@ -15,6 +15,9 @@ struct OwnershipView: View {
     @State private var message: String?
     @State private var confirmTransfer = false
     @State private var confirmRemove = false
+    @State private var confirmAccount = false
+    @State private var step: String?
+    @ObservedObject private var ble = BLEController.shared
 
     private var isAdmin: Bool { LockCache.loadKeys(serial: serial)?.commandKey?.admin ?? false }
     private var cleanEmail: String { email.trimmingCharacters(in: .whitespaces).lowercased() }
@@ -51,13 +54,17 @@ struct OwnershipView: View {
             }
 
             Section {
-                Label("Verwijder uit account", systemImage: "trash.slash")
-                    .foregroundStyle(.secondary)
+                Button(role: .destructive) { confirmAccount = true } label: {
+                    Label("Verwijder uit account", systemImage: "trash")
+                }
+                .disabled(busy || !isAdmin || !ble.ready)
             } footer: {
-                Text("In de officiële app herschrijft dit via Bluetooth de hoofdsleutels in het slot (eigendom resetten). Dat zit bewust niet in LinkaPlus: gaat het halverwege mis, dan kan niemand het slot meer bedienen. Gebruik ‘Overdragen’ als je het slot verkoopt.")
+                Text(!isAdmin ? "Alleen de eigenaar kan het slot uit het account verwijderen."
+                     : !ble.ready ? "Ga bij je slot staan: dit werkt alleen met een Bluetooth-verbinding."
+                     : "Zoals de officiële app: het slot krijgt zijn standaardinstellingen terug (ook quick-lock, slaaptijd en PAC), de server ontkoppelt het van je account, daarna herstart het slot. De sleutels ín het slot veranderen niet; LinkaPlus bewaart je sleutel als back-up.")
             }
 
-            if busy { Section { HStack { ProgressView(); Text("Bezig…") } } }
+            if busy { Section { HStack { ProgressView(); Text(step ?? "Bezig…") } } }
             if let message { Section { Text(message).font(.callout).foregroundStyle(Theme.danger) } }
         }
         .navigationTitle("Eigendom wijzigen")
@@ -67,6 +74,12 @@ struct OwnershipView: View {
             Button("Overdragen", role: .destructive) { transfer() }
         } message: {
             Text("\(lockName) gaat naar \(cleanEmail). Dit kun je niet zelf terugdraaien.")
+        }
+        .alert("Uit account verwijderen?", isPresented: $confirmAccount) {
+            Button("Annuleer", role: .cancel) {}
+            Button("Verwijderen", role: .destructive) { removeFromAccount() }
+        } message: {
+            Text("Het slot gaat terug naar standaardinstellingen en wordt van je LINKA-account ontkoppeld. Blijf bij het slot tot het klaar is.")
         }
         .alert("Verwijderen van deze telefoon?", isPresented: $confirmRemove) {
             Button("Annuleer", role: .cancel) {}
@@ -106,9 +119,34 @@ struct OwnershipView: View {
         }
     }
 
+    private func removeFromAccount() {
+        busy = true; message = nil
+        Task {
+            // Step 1–2: lock side (no key changes). Abort before touching the server on failure.
+            if let err = await ble.factoryResetForRemoval(progress: { step = $0 }) {
+                message = "Gestopt: \(err) Er is niets op de server gewijzigd; je kunt het opnieuw proberen."
+                busy = false; step = nil; return
+            }
+            step = "Ontkoppelen van account…"
+            do {
+                try await api.resetAllLockInformation(serial: serial, auth: session.identity())
+            } catch {
+                message = "Slot is gereset, maar de server gaf een fout: \((error as? LocalizedError)?.errorDescription ?? "\(error)"). Je sleutel werkt nog; probeer het opnieuw."
+                busy = false; step = nil; return
+            }
+            step = "Slot herstarten…"
+            ble.reboot()
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            ble.sleepLock()
+            busy = false; step = nil
+            finishRemoval()
+        }
+    }
+
     /// Forget the lock locally (keys, cache, Bluetooth) and go back to the list.
     private func finishRemoval() {
         BLEController.shared.stop()
+        if let k = Keychain.get("keys_\(serial)") { Keychain.set(k, for: "keys_backup_\(serial)") }
         Keychain.delete("keys_\(serial)")
         LockCache.saveLocks(LockCache.loadLocks().filter { $0.serial_no != serial })
         for k in ["ble_lastSerial", "ble_lastName", "ble_lastPeripheral"] { UserDefaults.standard.removeObject(forKey: k) }
