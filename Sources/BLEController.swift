@@ -11,9 +11,7 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var ready = false
     @Published private(set) var ctxEncVer: Int?
     @Published private(set) var ctxCounter: UInt32?
-    @Published private(set) var lockStateRaw: Int?
     @Published private(set) var liveLocked: Bool?
-    @Published private(set) var movementAlarmOn: Bool?
     @Published private(set) var rssi: Int?
     @Published private(set) var lastEvent: String = "–"
     @Published private(set) var commandResult: CommandResult?
@@ -30,14 +28,15 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var infoRaw: String?
     @Published private(set) var infoAt: Date?
 
-    // Raw response captured after a READ-setting request (for decoding).
-    // The device replies with an ACK frame first and (for value reads) a
-    // second data frame. We capture EVERY frame for a short window so the
-    // value frame is not lost behind the ack.
-    @Published private(set) var lastReadHex: String?
-    @Published private(set) var lastReadLabel: String?
+    // Setting values read back from the lock (GET_SETTING, opcode 4 — the reply
+    // is a plaintext type-3/4 frame: value = bytes[3..6] LE32).
+    @Published private(set) var settingValues: [Int: Int] = [:]
+    @Published private(set) var reading = false
     @Published private(set) var readFrames: [String] = []
+    @Published private(set) var lastReadLabel: String?
     private var awaitingRead: String?
+    private var pendingReadIdx: Int?
+    private var replyReceived = false
 
     /// Firmware revision read from the standard Device Information Service (0x2A26).
     @Published private(set) var fwRevision: String?
@@ -105,14 +104,18 @@ final class BLEController: NSObject, ObservableObject {
         // Lock state (byte[2], rc/b mapping). Shown as a diagnostic only — not yet
         // validated against a physical lock/unlock, so it does NOT drive liveLocked
         // (which stays authoritative from motor events + user actions).
+        // rc/b mapping (confirmed from APK packed-switch 0..8):
         switch Int(d[2]) {
+        case 0: lockStateText = "Opstarten"
         case 1: lockStateText = "Vergrendelen…"
         case 2: lockStateText = "Ontgrendelen…"
         case 3: lockStateText = "Vergrendeld"
         case 4: lockStateText = "Ontgrendeld"
-        case 5: lockStateText = "Vergrendeld (PAC)"
-        case 6: lockStateText = "Ontgrendeld (PAC)"
-        default: break
+        case 5: lockStateText = "Fout"
+        case 6: lockStateText = "Vastgelopen (stall)"
+        case 7: lockStateText = "Vergrendeld (PAC)"
+        case 8: lockStateText = "Ontgrendeld (PAC)"
+        default: lockStateText = "Onbekend (\(d[2]))"
         }
         // Status flags bitfield at bytes[12..15] (little-endian).
         if d.count >= 16 {
@@ -131,6 +134,14 @@ final class BLEController: NSObject, ObservableObject {
         }
     }
 
+    private func parseSettingReply(_ d: [UInt8]) {
+        guard d.count >= 7, d[0] == 0x14, d[1] == 0x03 || d[1] == 0x04 else { return }
+        let raw = UInt32(d[3]) | (UInt32(d[4]) << 8) | (UInt32(d[5]) << 16) | (UInt32(d[6]) << 24)
+        let idx = pendingReadIdx ?? Int(d[2])
+        settingValues[idx] = Int(Int32(bitPattern: raw))
+        replyReceived = true
+    }
+
     private func parseInfoPacket(_ d: [UInt8]) {
         guard d.count >= 16, d[1] == 0x0A else { return }
         func le16(_ i: Int) -> Int {
@@ -145,8 +156,7 @@ final class BLEController: NSObject, ObservableObject {
         let s = 6.3e-5
         accelG = SIMD3(Double(le16(8)) * s, Double(le16(10)) * s, Double(le16(12)) * s)
         infoExtra = le16(14)
-        // Byte[17] tracks a small value (19–21) independent of battery/uptime —
-        // consistent with temperature in °C. Shown as an estimate until confirmed.
+        // Byte[17] = temperature in °C (confirmed: pc/h.toString "Temp %ddeg").
         if d.count >= 18 { infoTempC = Int(d[17]) }
         infoRaw = LinkaCrypto.toHex(d)
         infoAt = Date()
@@ -182,6 +192,7 @@ final class BLEController: NSObject, ObservableObject {
     var channel = 0
     var counterOffset = 0
     private var didInitialStatusPing = false
+    private var lastUsedCounter: UInt32?   // anti-replay: last IV counter sent
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -215,52 +226,58 @@ final class BLEController: NSObject, ObservableObject {
         return out
     }
 
-    /// Sweeps key variants × channels × counter offsets. Sends the command that
-    /// would CHANGE the current lock state and auto-detects when the lock flips —
-    /// then records the winning combination and locks the Open/Sluit buttons to it.
+    /// Tries the access-key variants one by one (known-good key first) on the
+    /// real channel. Lockout-safe: max 4 attempts, a fresh context counter for
+    /// every attempt, 1.5 s between attempts, and it aborts after 2 rejections
+    /// in a row so the lock's bad-encryption counter cannot trip a lockout.
     func autoTest() {
         guard !testing else { return }
-        let variants = keyVariants()
+        var variants = keyVariants()
+        let current = LinkaCrypto.toHex(subkey)
+        variants.sort { ($0.hex.lowercased() == current) && ($1.hex.lowercased() != current) }
+        variants = Array(variants.prefix(4))
         guard !variants.isEmpty, mac.count == 6 else { add("Auto-test: geen sleutels/mac."); return }
+        guard write0002 != nil else { add("Auto-test: geen schrijfkanaal."); return }
         testing = true
         winner = nil
         Task {
-            // Detection is via the firmware log: "EncAdmin"/"EncUser" = accepted.
-            // Counter must be the live context value, so only off=0 is valid.
-            add("== Auto-test == stuurt een UNLOCK met elke sleutel × kanaal (live teller). Detecteert 'EncAdmin'.")
-            let channels = [0, 1]
-            let total = variants.count * channels.count
+            add("== Auto-test == max. 4 pogingen, stopt na 2 weigeringen (lockout-veilig).")
+            var rejects = 0
             var idx = 0
             outer: for v in variants {
-                for ch in channels {
-                    if !testing { break outer }
-                    idx += 1
-                    guard let c = ctxCounter else {
-                        add("[\(idx)/\(total)] wacht op teller…"); try? await Task.sleep(nanoseconds: 1_200_000_000); continue
-                    }
-                    let chr = (ch == 1) ? write0016 : write0002
-                    guard let chr = chr else { continue }
-                    encAccepted = nil
-                    let frame = LinkaCrypto.commandFrame(mac: mac, payload: [0, 0],
-                                                         subkey: LinkaCrypto.hex(v.hex), priv: v.priv, counter: c)
-                    add("[TEST \(idx)/\(total)] key=\(v.name) ch=\(ch == 1 ? "0016" : "0002") ctr=\(c)")
-                    let type: CBCharacteristicWriteType = chr.properties.contains(.write) ? .withResponse : .withoutResponse
-                    peripheral?.writeValue(Data(frame), for: chr, type: type)
-                    // Wait for the firmware verdict (~2s).
-                    for _ in 0..<8 {
-                        try? await Task.sleep(nanoseconds: 250_000_000)
-                        if encAccepted == true {
-                            winner = "key=\(v.name) ch=\(ch == 1 ? "0016" : "0002")"
-                            subkey = LinkaCrypto.hex(v.hex); priv = v.priv; channel = ch; counterOffset = 0
-                            add("✓✓ GELUKT! \(winner!) geaccepteerd. Open/Sluit staan nu vast op deze combinatie.")
-                            testing = false
-                            break outer
-                        }
-                        if encAccepted == false { break }  // rejected, next combo
-                    }
+                if !testing { break }
+                idx += 1
+                var waited = 0
+                while (ctxCounter == nil || ctxCounter == lastUsedCounter) && waited < 12 {
+                    try? await Task.sleep(nanoseconds: 250_000_000); waited += 1
                 }
+                guard let c = ctxCounter, c != lastUsedCounter, let chr = write0002 else {
+                    add("Auto-test gestopt: geen verse teller van het slot."); break
+                }
+                encAccepted = nil
+                let frame = LinkaCrypto.commandFrame(mac: mac, payload: [0, 0],
+                                                     subkey: LinkaCrypto.hex(v.hex), priv: v.priv, counter: c)
+                add("[TEST \(idx)/\(variants.count)] key=\(v.name) ctr=\(c)")
+                lastUsedCounter = c
+                let type: CBCharacteristicWriteType = chr.properties.contains(.write) ? .withResponse : .withoutResponse
+                peripheral?.writeValue(Data(frame), for: chr, type: type)
+                for _ in 0..<8 {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    if encAccepted == true {
+                        winner = "key=\(v.name)"
+                        subkey = LinkaCrypto.hex(v.hex); priv = v.priv; channel = 0; counterOffset = 0
+                        add("✓✓ GELUKT! \(winner!) geaccepteerd.")
+                        break outer
+                    }
+                    if encAccepted == false { break }
+                }
+                if encAccepted == false {
+                    rejects += 1
+                    if rejects >= 2 { add("Auto-test gestopt na 2 weigeringen (lockout-bescherming)."); break }
+                } else { rejects = 0 }
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
             }
-            if winner == nil { add("== Auto-test klaar (\(idx) pogingen), geen acceptatie gedetecteerd ==") }
+            if winner == nil { add("== Auto-test klaar (\(idx) pogingen), geen acceptatie ==") }
             testing = false
         }
     }
@@ -343,132 +360,111 @@ final class BLEController: NSObject, ObservableObject {
 
     func unlock() { sendPayload([0, 0], name: "Openen", expectActuation: true) { self.liveLocked = false } }
     func lock()   { sendPayload([1, 0], name: "Sluiten", expectActuation: true) { self.liveLocked = true } }
-    func sirenOn()  { sendPayload([14, 60], name: "Sirene") }
-    func sirenOff() { sendPayload([20, 0], name: "Sirene uit") }
-    func setPAC(_ code: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 1, value: code), name: "PAC-code instellen")
-    }
-    func setMovementAlarm(_ on: Bool) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 106, value: on ? 5 : 0),
-                    name: on ? "Beweeg-alarm aan" : "Beweeg-alarm uit") { self.movementAlarmOn = on }
+
+    // MARK: Lock settings (indices from the official app's pc/i table)
+
+    /// Write one setting, then read it back so the UI shows what the lock really has.
+    private func put(_ idx: Int, _ value: Int, _ name: String) {
+        sendPayload(LinkaCrypto.settingPayload(idx: idx, value: value), name: name)
+        Task { try? await Task.sleep(nanoseconds: 1_200_000_000); readSettings([idx]) }
     }
 
-    // MARK: Lock settings (parameter indices confirmed from the official app)
-
-    func setAutolock(_ on: Bool) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 102, value: on ? 20 : 0),
-                    name: on ? "Auto-lock aan" : "Auto-lock uit")
-    }
-    func setQuickLock(_ on: Bool) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 55, value: on ? 1 : 0),
-                    name: on ? "Quick-lock aan" : "Quick-lock uit")
-    }
-    func setAudio(_ on: Bool) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 12, value: on ? 1 : 0),
-                    name: on ? "Geluid aan" : "Geluid uit")
-    }
-    func setBumpThreshold(_ v: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 10, value: v), name: "Bump-gevoeligheid \(v)")
-    }
-    func setStall(_ v: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 5, value: v), name: "Stall-delay \(v)")
-    }
-    func setRollAngle(_ v: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 28, value: v), name: "Roll-hoek \(v)°")
-    }
-    func setTiltAngle(_ v: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 29, value: v), name: "Tilt-hoek \(v)°")
-    }
-    func setJostle(_ v: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 14, value: v), name: "Jostle \(v)")
-    }
-    func setAlarmDelay(_ v: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 7, value: v), name: "Alarm-delay \(v)")
-    }
-    func setAlarmTime(_ v: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 37, value: v), name: "Alarm-tijd \(v)")
-    }
-    func setLockSleep(_ v: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 17, value: v), name: "Lock-sleep \(v)")
-    }
+    func setQuickLock(_ on: Bool)   { put(55, on ? 1 : 0, on ? "Quick-lock aan" : "Quick-lock uit") }
+    func setAudio(_ on: Bool)       { put(12, on ? 1 : 0, on ? "Geluid aan" : "Geluid uit") }
+    func setBumpThreshold(_ v: Int) { put(10, v, "Bump-drempel \(v) mg") }
+    func setStallCurrent(_ v: Int)  { put(5, v, "Stall-stroom \(v) mA") }
+    func setStallDelay(_ v: Int)    { put(45, v, "Stall-vertraging \(v)") }
+    func setHammer(_ v: Int)        { put(15, v, "Hamer-drempel \(v)") }
+    func setAlarmTimeout(_ v: Int)  { put(8, v, "Alarm-timeout \(v)") }
+    func setRollAngle(_ v: Int)     { put(28, v, "Roll-hoek \(v)°") }
+    func setTiltAngle(_ v: Int)     { put(29, v, "Pitch-hoek \(v)°") }
+    func setJostle(_ v: Int)        { put(14, v, "Jostle \(v)") }
+    func setAlarmDelay(_ v: Int)    { put(7, v, "Alarm-vertraging \(v) s") }
+    func setAlarmTime(_ v: Int)     { put(37, v, "Alarm-duur \(v) s") }
+    func setLockSleep(_ v: Int)     { put(17, v, "Lock-sleep \(v) s") }
+    func setAccelDataRate(_ v: Int) { put(16, v, "Accel-datarate \(v)") }
+    func setPulseTap(_ v: Int)      { put(13, v, "Pulse-drempel \(v) mg") }
+    func setPAC(_ code: Int)        { put(1, code, "PAC-code instellen") }
     /// Unlock sleep: the official app writes both index 30 and 50. The lock
     /// hands us a fresh counter after the first, so send the second shortly after.
     func setUnlockSleep(_ v: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 30, value: v), name: "Unlock-sleep \(v)")
+        sendPayload(LinkaCrypto.settingPayload(idx: 30, value: v), name: "Unlock-sleep \(v) s")
         Task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            sendPayload(LinkaCrypto.settingPayload(idx: 50, value: v), name: "Unlock-sleep (2) \(v)")
+            sendPayload(LinkaCrypto.settingPayload(idx: 50, value: v), name: "Unlock-sleep (2) \(v) s")
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            readSettings([30])
         }
     }
     /// Raw parameter write — for advanced/experimental settings.
-    func writeSetting(idx: Int, value: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: idx, value: value), name: "Param \(idx) = \(value)")
-    }
-
-    func setAccelDataRate(_ v: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 16, value: v), name: "Accel-datarate \(v)")
-    }
-    func setPulseTap(_ v: Int) {
-        sendPayload(LinkaCrypto.settingPayload(idx: 13, value: v), name: "Pulse-tap \(v)")
-    }
+    func writeSetting(idx: Int, value: Int) { put(idx, value, "Param \(idx) = \(value)") }
 
     // MARK: Commands (opcodes from the firmware command map)
+    func sirenOn()         { sendPayload([14, 60], name: "Sirene") }
+    func sirenOff()        { sendPayload([20, 0], name: "Sirene uit") }
     func reboot()          { sendPayload([31, 0], name: "Herstart") }
     func sleepLock()       { sendPayload([9, 0],  name: "Slaapstand") }
     func statePing()       { sendPayload([27, 7], name: "State-ping") }
     func defaultSettings() { sendPayload([12, 0], name: "Standaardinstellingen herstellen") }
     func deleteBonds()     { sendPayload([13, 0], name: "Bluetooth-koppelingen wissen") }
+    /// Official anti-theft command 21: param 5 = off, 17 = reset.
+    func antiTheft(reset: Bool) { sendPayload([21, reset ? 17 : 5], name: reset ? "Anti-diefstal reset" : "Anti-diefstal uit") }
 
-    // MARK: Reads — response is encrypted; captured raw for decoding.
-    func readPAC()        { beginRead("PAC", idx: 1) }
-    func readActuations() { beginRead("Actuations", idx: 2) }
+    // MARK: Reads — GET_SETTING (opcode 4); reply is plaintext.
 
-    private func beginRead(_ label: String, idx: Int) {
-        awaitingRead = label
-        lastReadHex = nil; lastReadLabel = label
-        readFrames = []
-        sendPayload(LinkaCrypto.readPayload(idx: idx), name: "Lees \(label)")
-        // Close the capture window after ~1.5 s and try to decode a value frame.
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_600_000_000)
-            guard let self, self.awaitingRead == label else { return }
-            self.awaitingRead = nil
-            self.finishRead(label)
+    /// Reads settings one by one (each command needs the fresh counter the lock
+    /// hands out after the previous one). Results land in `settingValues`.
+    func readSettings(_ idxs: [Int]) {
+        guard ready, !reading else { return }
+        reading = true
+        Task {
+            for idx in idxs {
+                guard ready else { break }
+                var waited = 0
+                while ctxCounter == lastUsedCounter && waited < 12 {
+                    try? await Task.sleep(nanoseconds: 250_000_000); waited += 1
+                }
+                guard ready else { break }
+                pendingReadIdx = idx
+                replyReceived = false
+                awaitingRead = "Param \(idx)"
+                lastReadLabel = "Param \(idx)"
+                sendPayload(LinkaCrypto.readPayload(idx: idx), name: "Lees param \(idx)", quiet: true)
+                var t = 0
+                while !replyReceived && t < 8 { try? await Task.sleep(nanoseconds: 250_000_000); t += 1 }
+                awaitingRead = nil
+                pendingReadIdx = nil
+            }
+            reading = false
         }
     }
 
-    /// After the capture window, pick the frame that is NOT the ack template
-    /// and expose it. The ack is `14 02 04 .. .. 0d 11 04 00..00 1c 00 crc`.
-    private func finishRead(_ label: String) {
-        let frames = readFrames.map { $0.replacingOccurrences(of: " ", with: "") }
-        func isAck(_ h: String) -> Bool {
-            guard h.count == 40, h.hasPrefix("1402") else { return false }
-            // bytes 5..17 are a fixed template in the status ack frame
-            let mid = String(Array(h)[10..<36])
-            return mid == "0d110400000000000400001c00"
-        }
-        let value = frames.first(where: { !isAck($0) && $0.count >= 8 })
-        if let value {
-            lastReadHex = value
-            add("READ(\(label)) niet-ack frame: \(value)")
-        } else if let only = frames.first {
-            lastReadHex = only
-            add("READ(\(label)): \(frames.count) statusframe(s) ontvangen.")
-        } else {
-            add("READ(\(label)): geen respons ontvangen.")
-        }
-    }
+    func readPAC()        { readSettings([1]) }
+    func readActuations() { readSettings([2]) }
+    var lockPAC: Int? { settingValues[1] }
+    var actuations: Int? { settingValues[2] }
 
-    private func sendPayload(_ payload: [UInt8], name: String, expectActuation: Bool = false, onSuccess: (() -> Void)? = nil) {
+    private func sendPayload(_ payload: [UInt8], name: String, expectActuation: Bool = false, quiet: Bool = false, onSuccess: (() -> Void)? = nil) {
         let ch = (channel == 1) ? write0016 : write0002
         guard let ch = ch else { add("Geen write-characteristic."); return }
         guard let c = ctxCounter else { add("Nog geen context-teller (wacht op 0x12-frame)."); return }
         let useCounter = UInt32(truncatingIfNeeded: Int(c) + counterOffset)
+        // Anti-replay: the counter is the AES IV. Reusing it makes the firmware
+        // reject the command as "Bad enc" and increments its bad-enc counter, so
+        // refuse rather than send a stale frame — wait for a fresh 0x12 context.
+        if useCounter == lastUsedCounter {
+            add("Zelfde context-teller als vorige — wacht op vers 0x12-frame.")
+            if !quiet { commandResult = .timeout }
+            return
+        }
         let frame = LinkaCrypto.commandFrame(mac: mac, payload: payload, subkey: subkey, priv: priv, counter: useCounter)
         let type: CBCharacteristicWriteType = ch.properties.contains(.write) ? .withResponse : .withoutResponse
-        encAccepted = nil; vstateChanged = false; commandResult = nil
+        encAccepted = nil; vstateChanged = false
+        if !quiet { commandResult = nil }
         add("→ \(name) (ctr \(useCounter)): \(LinkaCrypto.toHex(frame))")
+        lastUsedCounter = useCounter
         peripheral?.writeValue(Data(frame), for: ch, type: type)
+        if quiet { return }
         Task {
             for _ in 0..<16 {
                 try? await Task.sleep(nanoseconds: 250_000_000)
@@ -521,6 +517,7 @@ extension BLEController: CBCentralManagerDelegate {
         Task { @MainActor in
             ready = false; state = "verbroken"; add("Verbinding verbroken.")
             didInitialStatusPing = false
+            lastUsedCounter = nil
             // Auto-reconnect unless the user intentionally stopped.
             if !intentionalStop, subkey.count == 16, mac.count == 6 {
                 try? await Task.sleep(nanoseconds: 600_000_000)
@@ -583,6 +580,7 @@ extension BLEController: CBPeripheralDelegate {
             }
             // Decode live telemetry: 0x0A motion/info packet, 0x02 status frame.
             parseInfoPacket(data)
+            parseSettingReply(data)
             parseStatusFrame(data)
             // The command context is the 0x12-prefixed frame (encVer 2).
             if data.count >= 7, data[0] == 0x12 {
@@ -605,10 +603,10 @@ extension BLEController: CBPeripheralDelegate {
                     // Capture EVERY frame in the window; the value frame may be
                     // the 2nd notification after the ack.
                     let hex = LinkaCrypto.toHex(data)
-                    readFrames.append(hex)
-                    lastReadHex = hex
+                    readFrames.append("\(label): \(hex)")
+                    if readFrames.count > 40 { readFrames.removeFirst() }
                     lastReadLabel = label
-                    add("READ(\(label)) frame \(readFrames.count): \(hex)")
+                    add("READ(\(label)): \(hex)")
                 } else {
                     add("← \(uuid.prefix(8)): \(LinkaCrypto.toHex(data))")
                 }

@@ -28,9 +28,6 @@ struct LockDetailView: View {
     @State private var bleStarted = false
     @State private var bleKeyError: String?
     @State private var showFinder = false
-    @State private var movementAlarmOn = false
-    @State private var pacCode = ""
-    @State private var storedPAC: Int?
     @State private var showStats = false
     @State private var showSharing = false
     @State private var showRename = false
@@ -38,7 +35,6 @@ struct LockDetailView: View {
     @State private var showSettings = false
     @State private var showFullMap = false
     @State private var showFirmware = false
-    @State private var showLockSettings = false
     @State private var heroLocked = true
 
     private var liveLocked: Bool { ble.liveLocked ?? lock.is_locked ?? true }
@@ -94,31 +90,19 @@ struct LockDetailView: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             compactMap
-            Spacer(minLength: 2)
+            Spacer(minLength: 10)
             heroControl
-            Spacer(minLength: 2)
+            Spacer(minLength: 10)
             mainButtons
         }
-        .padding(.horizontal)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(lock.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                let sirenOn = ble.statusFlags.contains("Sirene actief")
-                Button {
-                    Haptic.tap()
-                    if sirenOn { ble.sirenOff() }
-                    else if ble.ready { ble.sirenOn() }
-                    else { playSiren() }
-                } label: {
-                    Image(systemName: sirenOn ? "speaker.slash.fill" : "speaker.wave.3.fill")
-                        .foregroundStyle(sirenOn ? Theme.danger : Theme.accent)
-                }
-            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button { showSettings = true } label: {
                     Image(systemName: "slider.horizontal.3")
@@ -128,8 +112,6 @@ struct LockDetailView: View {
         .navigationDestination(isPresented: $showSettings) { settingsPage }
         .task {
             LockNotifier.shared.requestAuth()
-            movementAlarmOn = LockPrefs.movementAlarm(serial: lock.serial_no)
-            storedPAC = LockPrefs.pac(serial: lock.serial_no)
             heroLocked = ble.liveLocked ?? lock.is_locked ?? true
             loc.start()
             await startBLE()
@@ -161,9 +143,6 @@ struct LockDetailView: View {
         .sheet(isPresented: $showFullMap) { fullMapSheet }
         .sheet(isPresented: $showFirmware) {
             FirmwareView(ble: ble).environmentObject(session)
-        }
-        .sheet(isPresented: $showLockSettings) {
-            LockSettingsView(ble: ble, serial: lock.serial_no)
         }
         .sheet(isPresented: $showBLE) {
             BLEDiagnosticsView(lockName: lock.displayName)
@@ -250,12 +229,8 @@ struct LockDetailView: View {
 
     @ViewBuilder
     private var statusSection: some View {
-        Section("Status") {
-            statusRow(
-                "Slot",
-                value: statusText,
-                systemImage: statusIcon
-            )
+        Section("Slot") {
+            statusRow("Status", value: statusText, systemImage: statusIcon)
             if let battery = latestBattery {
                 let low = battery < Theme.batteryLowPct && !ble.isChargingBLE
                 HStack {
@@ -264,8 +239,7 @@ struct LockDetailView: View {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {
                         HStack(spacing: 6) {
-                            Text("\(battery)%")
-                                .foregroundStyle(low ? Theme.danger : .primary)
+                            Text("\(battery)%").foregroundStyle(low ? Theme.danger : .primary)
                             if let v = ble.batteryVoltageBLE {
                                 Text(String(format: "%.2f V", v)).foregroundStyle(.secondary)
                             }
@@ -275,22 +249,12 @@ struct LockDetailView: View {
                     }
                 }
             }
-            if let distanceText {
-                statusRow("Afstand tot slot", value: distanceText, systemImage: "location.fill")
-            }
             if let serial = lock.serial_no {
                 statusRow("Serienummer", value: serial, systemImage: "number")
             }
             if let coordinate {
-                statusRow(
-                    "Coördinaten",
-                    value: String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude),
-                    systemImage: "mappin.and.ellipse"
-                )
-                Button {
-                    openInMaps(coordinate)
-                } label: {
-                    Label("Open in Kaarten / routebeschrijving", systemImage: "car.fill")
+                Button { openInMaps(coordinate) } label: {
+                    Label("Route naar slot", systemImage: "car.fill")
                 }
             }
         }
@@ -366,63 +330,6 @@ struct LockDetailView: View {
                     Text("Haalt de cellulaire status op (zelfde call als de officiële app gebruikt). De teller kan iets achterlopen op de provider. Betalen gebeurt apart; dit vraagt alleen de status op.")
                 }
             }
-    }
-
-    @ViewBuilder
-    private var slotinstellingenSection: some View {
-        Section {
-            if !ble.ready {
-                Label("Verbind via Bluetooth om instellingen te wijzigen",
-                      systemImage: "antenna.radiowaves.left.and.right.slash")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-            Toggle(isOn: Binding(
-                get: { movementAlarmOn },
-                set: { on in
-                    movementAlarmOn = on
-                    LockPrefs.setMovementAlarm(on, serial: lock.serial_no)
-                    if ble.ready { ble.setMovementAlarm(on) }
-                }
-            )) {
-                Label("Beweeg-alarm", systemImage: "bell.badge")
-            }
-            .disabled(!ble.ready)
-
-            HStack {
-                Label("PAC-code", systemImage: "number.square")
-                Spacer()
-                if let p = storedPAC {
-                    Text(String(format: "%04d", p)).foregroundStyle(.secondary)
-                }
-            }
-            HStack {
-                TextField("nieuwe 4 cijfers", text: $pacCode)
-                    .keyboardType(.numberPad)
-                    .onChange(of: pacCode) { v in
-                        let digits = v.filter(\.isNumber)
-                        pacCode = String(digits.prefix(4))
-                    }
-                Spacer()
-                Button("Instellen") {
-                    if let code = Int(pacCode) {
-                        ble.setPAC(code)
-                        LockPrefs.setPAC(code, serial: lock.serial_no)
-                        storedPAC = code
-                        pacCode = ""
-                    }
-                }
-                .buttonStyle(.bordered)
-                .disabled(!ble.ready || pacCode.count < 4)
-            }
-
-            Button { showLockSettings = true } label: {
-                Label("Alle slotinstellingen…", systemImage: "gearshape.2")
-            }
-        } header: {
-            Text("Snelle instellingen")
-        } footer: {
-            Text("Beweeg-alarm waarschuwt bij beweging. De PAC-code is de tapcode om zonder telefoon te openen — de LEO geeft die niet terug over Bluetooth, dus de app onthoudt wat jij instelt. Onder \"Alle slotinstellingen\" staan alle parameters.")
-        }
     }
 
     @ViewBuilder
@@ -668,23 +575,54 @@ struct LockDetailView: View {
 
     private var settingsPage: some View {
         List {
-            // 1 — Overzicht
             statusSection
             statusFlagsSection
-            // 2 — Wat je instelt
-            slotinstellingenSection
-            // 3 — Waar het slot is
-            trackingSection
-            // 4 — Connectiviteit
-            dataplanSection
-            // 5 — Geschiedenis
-            activiteitenSection
-            // 6 — Delen & naam
-            beheerSection
-            // 7 — Diagnose / techniek (onderaan)
-            sensorsSection
-            geavanceerdSection
-            // 8 — Over
+
+            Section("Slot instellen") {
+                NavigationLink {
+                    SlotSettingsPage(kind: .security, ble: ble, serial: lock.serial_no)
+                } label: { Label("Beveiliging & alarm", systemImage: "shield.lefthalf.filled") }
+                NavigationLink {
+                    SlotSettingsPage(kind: .behaviour, ble: ble, serial: lock.serial_no)
+                } label: { Label("Gedrag & geluid", systemImage: "slider.horizontal.3") }
+                NavigationLink {
+                    SlotSettingsPage(kind: .sensitivity, ble: ble, serial: lock.serial_no)
+                } label: { Label("Gevoeligheid", systemImage: "waveform.path") }
+            }
+
+            Section("Locatie & data") {
+                NavigationLink {
+                    List { trackingSection }
+                        .navigationTitle("Tracking").navigationBarTitleDisplayMode(.inline)
+                } label: { Label("Tracking & recovery", systemImage: "dot.radiowaves.left.and.right") }
+                NavigationLink {
+                    List { dataplanSection }
+                        .navigationTitle("Dataplan").navigationBarTitleDisplayMode(.inline)
+                } label: { Label("Dataplan & verbruik", systemImage: "simcard") }
+                Button { showStats = true } label: {
+                    HStack {
+                        Label("Statistieken & activiteiten", systemImage: "chart.bar.fill")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if busy && activities.isEmpty { ProgressView() }
+                        else { Text("\(activities.count)").foregroundStyle(.secondary) }
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            Section("Delen & beheer") {
+                Button { showSharing = true } label: { Label("Delen & toegang", systemImage: "person.2.fill") }
+                Button { renameText = lock.displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
+            }
+
+            Section {
+                NavigationLink {
+                    advancedPage
+                } label: { Label("Geavanceerd", systemImage: "wrench.and.screwdriver") }
+            }
+
             Section {
                 EmptyView()
             } footer: {
@@ -699,6 +637,23 @@ struct LockDetailView: View {
             }
         }
         .navigationTitle("Instellingen")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var advancedPage: some View {
+        List {
+            Section {
+                NavigationLink {
+                    List { sensorsSection }
+                        .navigationTitle("Sensoren").navigationBarTitleDisplayMode(.inline)
+                } label: { Label("Sensoren (live)", systemImage: "gauge.with.dots.needle.33percent") }
+                NavigationLink {
+                    SlotSettingsPage(kind: .maintenance, ble: ble, serial: lock.serial_no)
+                } label: { Label("Onderhoud & uitlezen", systemImage: "wrench") }
+            }
+            geavanceerdSection
+        }
+        .navigationTitle("Geavanceerd")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -730,25 +685,16 @@ struct LockDetailView: View {
     }
 
     private var heroSubtitle: String {
-        if !ble.ready { return bleStatusText }
-        guard let k = knownLocked else { return "Status onbekend" }
-        return k ? "Tik om te openen" : "Tik om te sluiten"
+        if !ble.ready { return "Ga dichtbij je slot om het te bedienen" }
+        guard let k = knownLocked else { return "Tik op het slot om te openen of te sluiten" }
+        return k ? "Tik op het slot om te openen" : "Tik op het slot om te sluiten"
     }
 
     private var heroControl: some View {
         VStack(spacing: 14) {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(ble.ready ? Theme.accent : Color.secondary)
-                    .frame(width: 9, height: 9)
-                Text(bleStatusText).font(.subheadline.weight(.semibold))
-                if !ble.ready && bleKeyError == nil { ProgressView().scaleEffect(0.7) }
-            }
-            .foregroundStyle(.secondary)
+            connectionPill
 
-            // Lock-shaped control — the bolt bar slides to follow open/close.
-            // Drives off heroLocked (which always has a value: BLE → cloud →
-            // default), so the primary control is never inert while connected.
+            // Flat lock — tap to toggle, same action as the Openen/Sluiten buttons.
             Button {
                 Haptic.tap()
                 let locked = heroLocked
@@ -756,40 +702,68 @@ struct LockDetailView: View {
                 ble.channel = 0; ble.counterOffset = 0
                 if locked { ble.unlock() } else { ble.lock() }
             } label: {
-                LockGraphic(locked: heroLocked, color: heroColor, size: 190)
+                LockGraphic(locked: heroLocked, color: heroColor, size: 230)
             }
             .buttonStyle(PressableStyle())
             .disabled(!ble.ready)
-            .opacity(ble.ready ? 1 : 0.55)
+            .opacity(ble.ready ? 1 : 0.45)
 
-            Text(heroSubtitle)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            HStack(spacing: 22) {
-                heroStat(statusText, statusIcon, heroColor)
-                if let b = latestBattery {
-                    heroStat("\(b)%", ble.isChargingBLE ? "battery.100.bolt" : batteryIcon(b),
-                             b < Theme.batteryLowPct && !ble.isChargingBLE ? Theme.danger : .secondary)
-                }
-                if let d = distanceText {
-                    heroStat(d, "location.fill", .secondary)
-                }
+            // One fixed-height slot for hint / command result → no layout jumps.
+            Group {
+                if ble.commandResult != nil { commandResultRow }
+                else { Text(heroSubtitle).font(.footnote).foregroundStyle(.secondary) }
             }
-            .font(.caption)
+            .multilineTextAlignment(.center)
+            .frame(minHeight: 34)
 
-            commandResultRow
+            statCard
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func heroStat(_ text: String, _ icon: String, _ color: Color) -> some View {
-        VStack(spacing: 5) {
-            Image(systemName: icon).font(.title3).foregroundStyle(color)
-            Text(text).font(.caption).foregroundStyle(.secondary)
+    private var connectionPill: some View {
+        let reconnectable = ble.state == "verbroken" || ble.state == "gestopt"
+        return Button {
+            if reconnectable { ble.start() }
+        } label: {
+            HStack(spacing: 7) {
+                Circle().fill(ble.ready ? Theme.success : Color.secondary).frame(width: 8, height: 8)
+                Text(bleStatusText).font(.footnote.weight(.semibold))
+                if reconnectable { Image(systemName: "arrow.clockwise").font(.caption.weight(.bold)) }
+                else if !ble.ready && bleKeyError == nil { ProgressView().scaleEffect(0.65) }
+            }
+            .foregroundStyle(ble.ready ? Color.primary : Color.secondary)
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(Capsule().fill(Color(.secondarySystemBackground)))
         }
-        .frame(minWidth: 56)
+        .buttonStyle(.plain)
+        .disabled(!reconnectable)
+    }
+
+    private var statCard: some View {
+        let battery = latestBattery
+        let low = (battery ?? 100) < Theme.batteryLowPct && !ble.isChargingBLE
+        return HStack(spacing: 0) {
+            statColumn("Slot", statusText, statusIcon, knownLocked == nil ? Color.secondary : heroColor)
+            Divider().frame(height: 38)
+            statColumn("Batterij", battery.map { "\($0)%" } ?? "–",
+                       ble.isChargingBLE ? "battery.100.bolt" : (battery.map { batteryIcon($0) } ?? "battery.50"),
+                       low ? Theme.danger : Color.secondary)
+            Divider().frame(height: 38)
+            statColumn("Afstand", distanceText ?? "–", "location.fill", Color.secondary)
+        }
+        .padding(.vertical, 12)
+        .background(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            .fill(Color(.secondarySystemBackground)))
+    }
+
+    private func statColumn(_ title: String, _ value: String, _ icon: String, _ color: Color) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon).font(.title3).foregroundStyle(color)
+            Text(value).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var compactMap: some View {
@@ -820,6 +794,7 @@ struct LockDetailView: View {
 
     @ViewBuilder
     private var mainButtons: some View {
+        let sirenActive = ble.statusFlags.contains("Sirene actief")
         VStack(spacing: 10) {
             HStack(spacing: 12) {
                 Button {
@@ -840,17 +815,25 @@ struct LockDetailView: View {
             .controlSize(.large)
             .disabled(!ble.ready)
 
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 Button { showFinder = true } label: {
-                    Label("Zoek je slot", systemImage: "dot.radiowaves.left.and.right").font(.footnote)
+                    Label("Zoek slot", systemImage: "dot.radiowaves.left.and.right").frame(maxWidth: .infinity)
                 }
-                Spacer()
-                if ble.state == "verbroken" || ble.state == "gestopt" {
-                    Button { ble.start() } label: {
-                        Label("Herverbind", systemImage: "arrow.clockwise").font(.footnote)
-                    }
+                .buttonStyle(.bordered).tint(Theme.accent)
+                Button {
+                    Haptic.tap()
+                    if sirenActive { ble.sirenOff() }
+                    else if ble.ready { ble.sirenOn() }
+                    else { playSiren() }
+                } label: {
+                    Label(sirenActive ? "Alarm stop" : "Alarm",
+                          systemImage: sirenActive ? "speaker.slash.fill" : "speaker.wave.3.fill")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.bordered).tint(Theme.danger)
             }
+            .controlSize(.regular)
+
             if let e = bleKeyError {
                 Text(e).font(.caption2).foregroundStyle(Theme.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)

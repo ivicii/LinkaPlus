@@ -1,228 +1,176 @@
 import SwiftUI
 import UIKit
 
-/// Full lock-settings screen. Parameter indices reverse-engineered from the
-/// official app's LockController (confirmed against the working 106/5 = movement
-/// alarm). Writes go over Bluetooth; the lock must be connected.
-struct LockSettingsView: View {
+// MARK: - Reusable rows (values are READ from the lock, not remembered)
+
+/// Stepper for a numeric lock setting. Shows what the lock reports, lets you
+/// edit a draft, and applies it with one tap; the lock is read back afterwards.
+struct SettingStepperRow: View {
+    let title: String
+    let unit: String
+    let icon: String
+    let idx: Int
+    let range: ClosedRange<Int>
+    var step: Int = 1
+    @ObservedObject var ble: BLEController
+    let enabled: Bool
+    let apply: (Int) -> Void
+
+    @State private var draft = 0
+    @State private var edited = false
+
+    var body: some View {
+        let current = ble.settingValues[idx]
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(title, systemImage: icon)
+                Spacer()
+                Text(current.map { "\($0) \(unit)" } ?? "–")
+                    .foregroundStyle(.secondary).monospacedDigit()
+            }
+            HStack {
+                Stepper(value: Binding(get: { draft }, set: { draft = $0; edited = true }),
+                        in: range, step: step) {
+                    Text("\(draft) \(unit)").monospacedDigit().font(.callout)
+                }
+                Button("Toepassen") { apply(draft); edited = false }
+                    .buttonStyle(.bordered)
+                    .disabled(!enabled || draft == current)
+            }
+        }
+        .padding(.vertical, 2)
+        .onAppear { draft = current ?? range.lowerBound }
+        .onChange(of: current) { v in if let v, !edited { draft = v } }
+    }
+}
+
+/// On/off setting backed by a 0/1 lock parameter, with read-back verification.
+struct SettingToggleRow: View {
+    let title: String
+    let icon: String
+    let idx: Int
+    @ObservedObject var ble: BLEController
+    let enabled: Bool
+    let apply: (Bool) -> Void
+
+    @State private var local: Bool?
+
+    var body: some View {
+        let current = ble.settingValues[idx].map { $0 != 0 }
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: Binding(
+                get: { local ?? current ?? false },
+                set: { v in local = v; apply(v) }
+            )) { Label(title, systemImage: icon) }
+            .disabled(!enabled)
+            if let local, let current, local != current {
+                Label("Slot meldt “\(current ? "aan" : "uit")” — nog niet overgenomen.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(Theme.warn)
+            } else if let current {
+                Text("Slot meldt: \(current ? "aan" : "uit") ✓").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Nog niet uitgelezen").font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+        .onChange(of: current) { v in if v != nil, local == v { local = nil } }
+    }
+}
+
+// MARK: - Settings pages
+
+/// One page of lock settings. The settings menu is split into small, focused
+/// pages instead of one long scroll.
+struct SlotSettingsPage: View {
+    enum Kind { case security, behaviour, sensitivity, maintenance }
+
+    let kind: Kind
     @ObservedObject var ble: BLEController
     let serial: String?
-    @Environment(\.dismiss) var dismiss
 
-    // On/off settings (remembered per lock)
-    @State private var autoLock = false
-    @State private var quickLock = false
-    @State private var audioOn = false
-
-    // Numeric settings (value sent on "Schrijf")
-    @State private var bump = 5
-    @State private var stall = 3
-    @State private var alarmDelay = 5
-    @State private var alarmTime = 30
-    @State private var lockSleep = 30
-    @State private var unlockSleep = 30
-    @State private var rollAngle = 45
-    @State private var tiltAngle = 45
-    @State private var jostle = 5
-    @State private var accelRate = 2
-    @State private var pulseTap = 1
-
-    // Advanced raw write
+    @State private var pacInput = ""
     @State private var rawIdx = ""
     @State private var rawVal = ""
-
     @State private var showDefaultConfirm = false
     @State private var showBondsConfirm = false
-    @State private var copiedFrames = false
-
-    private func frameLabel(_ hex: String) -> String {
-        let h = hex.lowercased()
-        if h.hasPrefix("1402") { return "Statusframe (batterij/vlaggen)" }
-        if h.hasPrefix("140a") { return "Bewegingspakket (0x0A)" }
-        if h.hasPrefix("1412") || h.hasPrefix("12")  { return "Context (teller)" }
-        return "Onbekend frame"
-    }
+    @State private var showAntiTheft = false
+    @State private var copied = false
 
     private var connected: Bool { ble.ready }
 
-    var body: some View {
-        NavigationStack {
-            List {
-                if !connected {
-                    Section {
-                        Label("Niet verbonden — ga dichtbij je slot. Instellingen zijn uitgeschakeld tot 'Verbonden'.",
-                              systemImage: "antenna.radiowaves.left.and.right.slash")
-                            .font(.caption).foregroundStyle(Theme.warn)
-                    }
-                }
-
-                commandResultRow
-
-                Section("Vergrendeling") {
-                    Toggle(isOn: Binding(
-                        get: { autoLock },
-                        set: { v in autoLock = v; LockPrefs.setBool(v, key: "autoLock", serial: serial); if connected { ble.setAutolock(v) } }
-                    )) { Label("Auto-lock", systemImage: "lock.rotation") }
-                    Toggle(isOn: Binding(
-                        get: { quickLock },
-                        set: { v in quickLock = v; LockPrefs.setBool(v, key: "quickLock", serial: serial); if connected { ble.setQuickLock(v) } }
-                    )) { Label("Quick-lock", systemImage: "bolt.horizontal") }
-                    Toggle(isOn: Binding(
-                        get: { audioOn },
-                        set: { v in audioOn = v; LockPrefs.setBool(v, key: "audio", serial: serial); if connected { ble.setAudio(v) } }
-                    )) { Label("Geluid / pieptonen", systemImage: "speaker.wave.2") }
-                }
-                .disabled(!connected)
-
-                Section {
-                    numeric("Bump-drempel (mg)", value: $bump, range: 0...255, icon: "waveform.path", key: "bump") { ble.setBumpThreshold($0) }
-                    numeric("Stall-vertraging (×100 ms)", value: $stall, range: 0...50, icon: "hourglass", key: "stall") { ble.setStall($0) }
-                    numeric("Alarm-vertraging (s)", value: $alarmDelay, range: 0...60, icon: "timer", key: "alarmDelay") { ble.setAlarmDelay($0) }
-                    numeric("Alarm-duur (s)", value: $alarmTime, range: 0...255, icon: "alarm", key: "alarmTime") { ble.setAlarmTime($0) }
-                } header: {
-                    Text("Alarm & gevoeligheid")
-                } footer: {
-                    Text("Eenheden uit de officiële app: bump-drempel in mg (milli-g, lager = gevoeliger), stall-vertraging in stappen van 100 ms, alarm-vertraging en -duur in seconden. De waarde wordt pas geschreven als je op ‘Schrijf’ tikt.")
-                }
-                .disabled(!connected)
-
-                Section {
-                    numeric("Roll-alarm (°, zijwaarts)", value: $rollAngle, range: 0...90, icon: "rotate.3d", key: "rollAngle") { ble.setRollAngle($0) }
-                    numeric("Pitch-alarm (°, voor/achter)", value: $tiltAngle, range: 0...90, icon: "gyroscope", key: "tiltAngle") { ble.setTiltAngle($0) }
-                    numeric("Jostle (×100 ms)", value: $jostle, range: 0...50, icon: "waveform", key: "jostle") { ble.setJostle($0) }
-                    numeric("Accel data-rate", value: $accelRate, range: 0...10, icon: "speedometer", key: "accelRate") { ble.setAccelDataRate($0) }
-                    numeric("Pulse-drempel (mg)", value: $pulseTap, range: 0...255, icon: "hand.tap", key: "pulseTap") { ble.setPulseTap($0) }
-                } header: {
-                    Text("Kanteling-alarm & gevoeligheid")
-                } footer: {
-                    Text("Eenheden uit de officiële app: roll/pitch-alarm in graden (hoek waarbij het alarm afgaat), jostle-venster in stappen van 100 ms, bump/pulse-drempel in mg. Accel-datarate regelt hoe vaak de sensor meet.")
-                }
-                .disabled(!connected)
-
-                Section {
-                    numeric("Lock-sleep (s)", value: $lockSleep, range: 0...255, icon: "moon.zzz", key: "lockSleep") { ble.setLockSleep($0) }
-                    numeric("Unlock-sleep (s)", value: $unlockSleep, range: 0...255, icon: "moon", key: "unlockSleep") { ble.setUnlockSleep($0) }
-                } header: {
-                    Text("Energie (sleep)")
-                } footer: {
-                    Text("In seconden (uit de officiële app). Hoe lang het slot wacht voor het in slaapstand gaat — langer = sneller reageren, meer batterijverbruik.")
-                }
-                .disabled(!connected)
-
-                Section {
-                    Button { ble.statePing() } label: { Label("State-ping (status opvragen)", systemImage: "dot.radiowaves.up.forward") }
-                    Button { ble.reboot() } label: { Label("Herstart slot", systemImage: "arrow.clockwise.circle") }
-                    Button { ble.sleepLock() } label: { Label("Slaapstand", systemImage: "moon.zzz") }
-                } header: {
-                    Text("Onderhoud")
-                } footer: {
-                    Text("Herstart start de slot-firmware opnieuw op. Slaapstand zet 'm in energiebesparing (ontwaakt bij beweging/BLE).")
-                }
-                .disabled(!connected)
-
-                Section {
-                    Button { ble.readPAC() } label: { Label("Lees PAC-code", systemImage: "number.square") }
-                    Button { ble.readActuations() } label: { Label("Lees actuations (totaalteller)", systemImage: "number") }
-                    if ble.readFrames.isEmpty {
-                        Text("Nog geen frames. Tik op een leesknop.").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        ForEach(Array(ble.readFrames.enumerated()), id: \.offset) { i, f in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(i + 1) · \(frameLabel(f))")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                                Text(f)
-                                    .font(.system(.caption2, design: .monospaced))
-                                    .textSelection(.enabled)
-                            }
-                        }
-                        Button {
-                            let header = "\(ble.lastReadLabel ?? "Read"):"
-                            UIPasteboard.general.string = ([header] + ble.readFrames).joined(separator: "\n")
-                            Haptic.tap(.light)
-                            copiedFrames = true
-                        } label: {
-                            Label(copiedFrames ? "Gekopieerd ✓" : "Kopieer alle frames",
-                                  systemImage: copiedFrames ? "checkmark" : "doc.on.doc")
-                        }
-                    }
-                } header: {
-                    Text("Uitlezen (diagnose)")
-                } footer: {
-                    Text("De LEO geeft de PAC-code en actuations níét terug over Bluetooth — een lezing levert alleen een bevestiging (ACK, 1402…) en een statuspakket (140a…). Deze frames zijn dus voor diagnose; de ingestelde PAC onthoudt de app zelf.")
-                }
-                .disabled(!connected)
-
-                Section {
-                    HStack {
-                        TextField("index", text: $rawIdx).keyboardType(.numberPad).frame(width: 70)
-                        Divider()
-                        TextField("waarde", text: $rawVal).keyboardType(.numberPad)
-                        Button("Schrijf") {
-                            if let i = Int(rawIdx), let v = Int(rawVal), connected { ble.writeSetting(idx: i, value: v) }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!connected || Int(rawIdx) == nil || Int(rawVal) == nil)
-                    }
-                } header: {
-                    Text("Parameter schrijven (geavanceerd)")
-                } footer: {
-                    Text("Schrijf elke parameter-index + waarde rechtstreeks. Bekend: 1=PAC, 5=stall, 7=alarm-delay, 10=bump, 12=audio, 13=pulse-tap, 14=jostle, 16=accel-rate, 17=lock-sleep, 28=roll-hoek, 29=tilt-hoek, 30/50=unlock-sleep, 37=alarm-tijd, 55=quick-lock, 102=auto-lock, 106=beweeg-alarm. ⚠︎ Onbekende indexen/waarden op eigen risico.")
-                }
-                .disabled(!connected)
-
-                Section {
-                    Button(role: .destructive) { showDefaultConfirm = true } label: {
-                        Label("Standaardinstellingen herstellen", systemImage: "arrow.counterclockwise")
-                    }
-                    Button(role: .destructive) { showBondsConfirm = true } label: {
-                        Label("Bluetooth-koppelingen wissen", systemImage: "trash")
-                    }
-                } header: {
-                    Text("Gevaarlijk")
-                } footer: {
-                    Text("Deze acties resetten instellingen of ontkoppelen apparaten. Gebruik met beleid.")
-                }
-                .disabled(!connected)
-            }
-            .navigationTitle("Slotinstellingen")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Sluit") { dismiss() } } }
-            .alert("Standaardinstellingen herstellen?", isPresented: $showDefaultConfirm) {
-                Button("Annuleer", role: .cancel) {}
-                Button("Herstellen", role: .destructive) { ble.defaultSettings() }
-            } message: {
-                Text("Dit zet alle slotinstellingen terug naar fabrieksstandaard.")
-            }
-            .alert("Koppelingen wissen?", isPresented: $showBondsConfirm) {
-                Button("Annuleer", role: .cancel) {}
-                Button("Wissen", role: .destructive) { ble.deleteBonds() }
-            } message: {
-                Text("Dit verwijdert alle Bluetooth-koppelingen van het slot. Je moet daarna opnieuw verbinden.")
-            }
-            .onChange(of: ble.readFrames.count) { _ in copiedFrames = false }
-            .onAppear {
-                autoLock = LockPrefs.bool("autoLock", serial: serial)
-                quickLock = LockPrefs.bool("quickLock", serial: serial)
-                audioOn = LockPrefs.bool("audio", serial: serial)
-                // Restore last-written numeric values (lock doesn't return them).
-                bump = LockPrefs.int("bump", serial: serial, fallback: bump)
-                stall = LockPrefs.int("stall", serial: serial, fallback: stall)
-                alarmDelay = LockPrefs.int("alarmDelay", serial: serial, fallback: alarmDelay)
-                alarmTime = LockPrefs.int("alarmTime", serial: serial, fallback: alarmTime)
-                rollAngle = LockPrefs.int("rollAngle", serial: serial, fallback: rollAngle)
-                tiltAngle = LockPrefs.int("tiltAngle", serial: serial, fallback: tiltAngle)
-                jostle = LockPrefs.int("jostle", serial: serial, fallback: jostle)
-                accelRate = LockPrefs.int("accelRate", serial: serial, fallback: accelRate)
-                pulseTap = LockPrefs.int("pulseTap", serial: serial, fallback: pulseTap)
-                lockSleep = LockPrefs.int("lockSleep", serial: serial, fallback: lockSleep)
-                unlockSleep = LockPrefs.int("unlockSleep", serial: serial, fallback: unlockSleep)
-            }
+    /// Which parameters this page shows (read automatically when it opens).
+    private var indices: [Int] {
+        switch kind {
+        case .security:    return [1, 7, 37]
+        case .behaviour:   return [55, 12, 17, 30]
+        case .sensitivity: return [10, 14, 13, 28, 29, 15, 16]
+        case .maintenance: return [5, 45]
         }
     }
 
+    private var title: String {
+        switch kind {
+        case .security:    return "Beveiliging & alarm"
+        case .behaviour:   return "Gedrag & geluid"
+        case .sensitivity: return "Gevoeligheid"
+        case .maintenance: return "Onderhoud & uitlezen"
+        }
+    }
+
+    private static let counterNames: [(Int, String)] = [
+        (2, "Actuaties (totaal)"), (3, "Slotfouten"), (31, "Foute PAC-pogingen"),
+        (32, "Foute versleuteling"), (33, "Tamper (opgeslagen)"),
+    ]
+    private static let allIdx = [1, 2, 3, 5, 7, 10, 12, 13, 14, 15, 16, 17, 28, 29, 30, 31, 32, 33, 37, 45, 55]
+
+    var body: some View {
+        List {
+            if !connected {
+                Section {
+                    Label("Niet verbonden — ga dichtbij je slot. Wijzigen kan pas als het slot verbonden is.",
+                          systemImage: "antenna.radiowaves.left.and.right.slash")
+                        .font(.footnote).foregroundStyle(Theme.warn)
+                }
+            }
+            if let r = ble.commandResult { Section { resultLabel(r) } }
+            content
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if ble.reading { ProgressView() }
+                else {
+                    Button { load() } label: { Image(systemName: "arrow.clockwise") }
+                        .disabled(!connected)
+                }
+            }
+        }
+        .onAppear { load() }
+        .onChange(of: ble.ready) { r in if r { load() } }
+        .alert("Standaardinstellingen herstellen?", isPresented: $showDefaultConfirm) {
+            Button("Annuleer", role: .cancel) {}
+            Button("Herstellen", role: .destructive) { ble.defaultSettings() }
+        } message: { Text("Dit zet alle slotinstellingen terug naar fabrieksstandaard.") }
+        .alert("Koppelingen wissen?", isPresented: $showBondsConfirm) {
+            Button("Annuleer", role: .cancel) {}
+            Button("Wissen", role: .destructive) { ble.deleteBonds() }
+        } message: { Text("Dit verwijdert alle Bluetooth-koppelingen van het slot. Je moet daarna opnieuw verbinden.") }
+        .confirmationDialog("Anti-diefstal", isPresented: $showAntiTheft, titleVisibility: .visible) {
+            Button("Anti-diefstal uitzetten") { ble.antiTheft(reset: false) }
+            Button("Anti-diefstal resetten") { ble.antiTheft(reset: true) }
+            Button("Annuleer", role: .cancel) {}
+        } message: { Text("Officiële commando’s van de LINKA-app (command 21).") }
+    }
+
+    private func load() {
+        guard connected else { return }
+        ble.readSettings(indices)
+    }
+
     @ViewBuilder
-    private var commandResultRow: some View {
-        switch ble.commandResult {
+    private func resultLabel(_ r: BLEController.CommandResult) -> some View {
+        switch r {
         case .success(let n):
             Label("\(n) gelukt", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.success).font(.callout)
         case .rejected:
@@ -231,23 +179,175 @@ struct LockSettingsView: View {
             Label("\(n): niet gelukt", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.warn).font(.callout)
         case .timeout:
             Label("Geen reactie van het slot", systemImage: "clock.badge.exclamationmark").foregroundStyle(.secondary).font(.callout)
-        case .none:
-            EmptyView()
         }
     }
 
     @ViewBuilder
-    private func numeric(_ title: String, value: Binding<Int>, range: ClosedRange<Int>,
-                         icon: String, key: String = "", write: @escaping (Int) -> Void) -> some View {
-        HStack {
-            Stepper(value: value, in: range) {
-                Label("\(title): \(value.wrappedValue)", systemImage: icon)
+    private func stepper(_ title: String, unit: String, icon: String, idx: Int,
+                         range: ClosedRange<Int>, step: Int = 1, apply: @escaping (Int) -> Void) -> some View {
+        SettingStepperRow(title: title, unit: unit, icon: icon, idx: idx, range: range, step: step,
+                          ble: ble, enabled: connected, apply: apply)
+    }
+
+    private var pacText: String {
+        if let p = ble.lockPAC { return String(format: "%04d", p) }
+        if let s = LockPrefs.pac(serial: serial) { return String(format: "%04d", s) + " (laatst ingesteld)" }
+        return "–"
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch kind {
+        case .security:
+            Section {
+                HStack {
+                    Label("PAC-code op slot", systemImage: "number.square")
+                    Spacer()
+                    Text(pacText).foregroundStyle(.secondary).monospacedDigit()
+                }
+                HStack {
+                    TextField("nieuwe 4 cijfers", text: $pacInput)
+                        .keyboardType(.numberPad)
+                        .onChange(of: pacInput) { v in pacInput = String(v.filter(\.isNumber).prefix(4)) }
+                    Button("Instellen") {
+                        if let code = Int(pacInput) {
+                            ble.setPAC(code)
+                            LockPrefs.setPAC(code, serial: serial)
+                            pacInput = ""
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!connected || pacInput.count < 4)
+                }
+            } header: { Text("PAC-code") } footer: {
+                Text("De tapcode om het slot zonder telefoon te openen. De app leest hem rechtstreeks uit het slot (GET_SETTING).")
             }
-            Button("Schrijf") {
-                write(value.wrappedValue)
-                if !key.isEmpty { LockPrefs.setInt(value.wrappedValue, key: key, serial: serial) }
+            Section {
+                stepper("Alarm-vertraging", unit: "s", icon: "timer", idx: 7, range: 0...60) { ble.setAlarmDelay($0) }
+                stepper("Alarm-duur (experimenteel)", unit: "s", icon: "alarm", idx: 37, range: 0...255) { ble.setAlarmTime($0) }
+            } header: { Text("Alarm") } footer: {
+                Text("Index 37 staat niet in de officiële tabel — de uitleesregel hierboven laat zien of het slot de waarde echt overneemt.")
             }
-            .buttonStyle(.bordered).font(.footnote)
+
+        case .behaviour:
+            Section {
+                SettingToggleRow(title: "Quick-lock", icon: "bolt.horizontal", idx: 55,
+                                 ble: ble, enabled: connected) { ble.setQuickLock($0) }
+                SettingToggleRow(title: "Geluid & pieptonen", icon: "speaker.wave.2", idx: 12,
+                                 ble: ble, enabled: connected) { ble.setAudio($0) }
+            } header: { Text("Slot") } footer: {
+                Text("Quick-lock: sluit het slot zónder telefoon door 2× op de POWER-knop van het slot te drukken (volgens de officiële app). Het commando wordt na het schrijven teruggelezen, zodat je ziet of het slot de instelling echt heeft overgenomen.")
+            }
+            Section {
+                stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 0...255) { ble.setLockSleep($0) }
+                stepper("Unlock-sleep", unit: "s", icon: "moon", idx: 30, range: 0...255) { ble.setUnlockSleep($0) }
+            } header: { Text("Slaapstand") } footer: {
+                Text("Hoe lang het slot wacht voordat het in slaap valt. Langer = sneller reageren, meer batterijverbruik.")
+            }
+
+        case .sensitivity:
+            Section {
+                stepper("Bump-drempel", unit: "mg", icon: "waveform.path", idx: 10, range: 0...255) { ble.setBumpThreshold($0) }
+                stepper("Pulse-drempel", unit: "mg", icon: "hand.tap", idx: 13, range: 0...255) { ble.setPulseTap($0) }
+                stepper("Hamer-drempel", unit: "mg", icon: "hammer", idx: 15, range: 0...2000, step: 10) { ble.setHammer($0) }
+                stepper("Jostle-venster", unit: "×100 ms", icon: "waveform", idx: 14, range: 0...50) { ble.setJostle($0) }
+            } header: { Text("Schokken & trillingen") } footer: {
+                Text("Drempels in milli-g: lager = gevoeliger.")
+            }
+            Section {
+                stepper("Roll-alarm", unit: "°", icon: "rotate.3d", idx: 28, range: 0...90) { ble.setRollAngle($0) }
+                stepper("Pitch-alarm", unit: "°", icon: "gyroscope", idx: 29, range: 0...90) { ble.setTiltAngle($0) }
+                stepper("Sensor-datarate", unit: "", icon: "speedometer", idx: 16, range: 0...10) { ble.setAccelDataRate($0) }
+            } header: { Text("Kanteling") } footer: {
+                Text("Hoek waarbij het alarm afgaat. Datarate bepaalt hoe vaak de sensor meet.")
+            }
+
+        case .maintenance:
+            Section {
+                Button { ble.statePing() } label: { Label("Status opvragen", systemImage: "dot.radiowaves.up.forward") }
+                Button { ble.sleepLock() } label: { Label("Slaapstand", systemImage: "moon.zzz") }
+                Button { ble.reboot() } label: { Label("Herstart slot", systemImage: "arrow.clockwise.circle") }
+            } header: { Text("Acties") }
+            .disabled(!connected)
+
+            Section {
+                stepper("Stall-motorstroom", unit: "mA", icon: "bolt.fill", idx: 5, range: 0...2000, step: 10) { ble.setStallCurrent($0) }
+                stepper("Stall-vertraging", unit: "×100 ms", icon: "hourglass", idx: 45, range: 0...50) { ble.setStallDelay($0) }
+            } header: { Text("Motor") } footer: {
+                Text("Wanneer het slot de motor als ‘vastgelopen’ beschouwt. Alleen aanpassen als het slot onbetrouwbaar sluit.")
+            }
+
+            Section {
+                Button {
+                    ble.readSettings(Self.allIdx)
+                } label: {
+                    HStack {
+                        Label("Alles uitlezen", systemImage: "square.and.arrow.down")
+                        if ble.reading { Spacer(); ProgressView() }
+                    }
+                }
+                .disabled(!connected || ble.reading)
+                ForEach(Self.counterNames, id: \.0) { item in
+                    HStack {
+                        Text(item.1)
+                        Spacer()
+                        Text(ble.settingValues[item.0].map { String($0) } ?? "–").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+                if !ble.settingValues.isEmpty {
+                    Button {
+                        UIPasteboard.general.string = ble.settingValues.sorted { $0.key < $1.key }
+                            .map { "idx \($0.key) = \($0.value)" }.joined(separator: "\n")
+                        Haptic.tap(.light); copied = true
+                    } label: {
+                        Label(copied ? "Gekopieerd ✓" : "Kopieer alle waarden", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                }
+            } header: { Text("Uitlezen") } footer: {
+                Text("Actuaties en veiligheidstellers (foute PAC- en versleutelingspogingen) rechtstreeks uit het slot.")
+            }
+
+            if !ble.readFrames.isEmpty {
+                Section("Laatste frames (diagnose)") {
+                    ForEach(Array(ble.readFrames.suffix(8).enumerated()), id: \.offset) { _, f in
+                        Text(f).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
+                    }
+                    Button {
+                        UIPasteboard.general.string = ble.readFrames.joined(separator: "\n")
+                        Haptic.tap(.light)
+                    } label: { Label("Kopieer frames", systemImage: "doc.on.doc") }
+                }
+            }
+
+            Section {
+                HStack {
+                    TextField("index", text: $rawIdx).keyboardType(.numberPad).frame(width: 70)
+                    Divider()
+                    TextField("waarde", text: $rawVal).keyboardType(.numbersAndPunctuation)
+                    Button("Schrijf") {
+                        if let i = Int(rawIdx), let v = Int(rawVal) { ble.writeSetting(idx: i, value: v) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!connected || Int(rawIdx) == nil || Int(rawVal) == nil)
+                }
+            } header: { Text("Parameter schrijven") } footer: {
+                Text("Schrijf elke index + waarde rechtstreeks; daarna wordt hij teruggelezen. ⚠︎ Onbekende indexen op eigen risico.")
+            }
+
+            Section {
+                Button(role: .destructive) { showAntiTheft = true } label: {
+                    Label("Anti-diefstal uit / reset", systemImage: "shield.slash")
+                }
+                Button(role: .destructive) { showDefaultConfirm = true } label: {
+                    Label("Standaardinstellingen herstellen", systemImage: "arrow.counterclockwise")
+                }
+                Button(role: .destructive) { showBondsConfirm = true } label: {
+                    Label("Bluetooth-koppelingen wissen", systemImage: "trash")
+                }
+            } header: { Text("Gevaarlijk") } footer: {
+                Text("Deze acties resetten instellingen of ontkoppelen apparaten. Gebruik met beleid.")
+            }
+            .disabled(!connected)
         }
     }
 }

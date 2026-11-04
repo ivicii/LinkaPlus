@@ -1,46 +1,48 @@
 import SwiftUI
+import UIKit
 
-/// A visual of the LINKA LEO ring lock: a horseshoe body with a bolt bar that
-/// slides across the bottom gap to lock, and retracts to open. The bar animates
-/// over ~1.2s so it visually follows the real motor (which isn't instant).
+/// Flat 2D drawing of the LINKA ring lock — same shape as the app icon: a
+/// neutral horseshoe ring with a bolt bar across the bottom gap. The bar (and
+/// the centre dot) carry the state colour; the bar slides closed/open.
 struct LockGraphic: View {
     /// true = locked (bar closed), false = open (bar retracted).
     let locked: Bool
-    /// Colour of the ring (green locked, orange open, blue unknown).
+    /// State colour (green locked, orange open, blue unknown).
     let color: Color
     var size: CGFloat = 200
 
+    private static let ringColor = Color(UIColor { t in
+        t.userInterfaceStyle == .dark ? UIColor(white: 0.90, alpha: 1) : UIColor(white: 0.17, alpha: 1)
+    })
+
     var body: some View {
+        let r = size * 0.38           // ring centre-line radius
+        let t = size * 0.15           // ring thickness
+        let g = 0.0944                // gap half-angle in turns (34°)
+        let ex = r * sin(34 * .pi / 180)
+        let ey = r * cos(34 * .pi / 180)
+        let barH = t * 0.78
+        let barW = locked ? ex * 2 + barH : barH
+
         ZStack {
-            // Horseshoe body: a ring with a gap at the bottom.
             Circle()
-                .trim(from: 0.07, to: 0.93)
-                .stroke(Theme.grad(color),
-                        style: StrokeStyle(lineWidth: size * 0.17, lineCap: .round))
+                .trim(from: g, to: 1 - g)
+                .stroke(Self.ringColor, style: StrokeStyle(lineWidth: t, lineCap: .round))
                 .rotationEffect(.degrees(90))
-                .frame(width: size, height: size)
-                .shadow(color: color.opacity(0.28), radius: 10, y: 6)
+                .frame(width: r * 2, height: r * 2)
 
-            // Bolt bar across the bottom gap.
+            Circle()
+                .fill(color)
+                .frame(width: t * 0.46, height: t * 0.46)
+
             Capsule()
-                .fill(Color.white)
-                .frame(width: locked ? size * 0.54 : size * 0.17, height: size * 0.12)
-                .overlay(
-                    Capsule().stroke(color.opacity(0.25), lineWidth: 1)
-                )
-                .offset(x: locked ? 0 : size * 0.21, y: size * 0.415)
-                .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
-
-            // Lock glyph in the centre — tinted to the ring colour so it reads as
-            // part of the graphic, not a sticker on top. The sliding bolt carries
-            // the state; the glyph is a quiet reinforcement.
-            Image(systemName: locked ? "lock.fill" : "lock.open.fill")
-                .font(.system(size: size * 0.20, weight: .semibold))
-                .foregroundStyle(color)
-                .offset(y: -size * 0.04)
-                .animation(.easeInOut(duration: 0.3), value: locked)
+                .fill(color)
+                .frame(width: barW, height: barH)
+                .offset(x: locked ? 0 : ex, y: ey)
         }
+        .offset(y: -size * 0.03)
         .frame(width: size, height: size)
-        .animation(.easeInOut(duration: 1.2), value: locked)
+        .animation(.easeInOut(duration: 1.0), value: locked)
+        .animation(.easeInOut(duration: 0.3), value: color)
     }
 }

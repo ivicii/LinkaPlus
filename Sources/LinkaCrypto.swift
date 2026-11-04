@@ -102,17 +102,10 @@ enum LinkaCrypto {
         return p
     }
 
-    /// Payload for a READ-setting packet (pc/i: VCMD_READ, type byte 0x02).
+    /// Payload for a GET_SETTING packet (pc/d: VCMD_GET_SETTING = 4). Opcode 2 is
+    /// VCMD_STATUS, which only makes the lock answer with a status frame.
     static func readPayload(idx: Int) -> [UInt8] {
-        return [0x02, UInt8(idx & 0xff), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    }
-
-    // MARK: Status frame parse (pc/e) — encVer = byte[2], counter = int32 LE at [3..6]
-    static func parseStatus(_ frame: [UInt8]) -> (encVer: Int, counter: UInt32)? {
-        guard frame.count >= 7 else { return nil }
-        let encVer = Int(frame[2])
-        let counter = UInt32(frame[3]) | (UInt32(frame[4]) << 8) | (UInt32(frame[5]) << 16) | (UInt32(frame[6]) << 24)
-        return (encVer, counter)
+        return [0x04, UInt8(idx & 0xff), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     }
 
     // MARK: helpers
