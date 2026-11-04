@@ -126,8 +126,8 @@ struct SlotSettingsPage: View {
     }
 
     private static let counterNames: [(Int, String)] = [
-        (2, "Actuaties (totaal)"), (3, "Slotfouten"), (31, "Foute PAC-pogingen"),
-        (32, "Foute versleuteling"), (33, "Tamper (opgeslagen)"),
+        (2, "Actuaties (totaal)"), (3, "Slotfouten"), (31, "Foute-PAC limiet (idx 31)"),
+        (32, "Foute-versleuteling limiet (idx 32)"), (33, "Tamper-bits (idx 33)"),
     ]
     private static let allIdx = [1, 2, 3, 5, 7, 10, 12, 13, 14, 15, 16, 17, 28, 29, 30, 31, 32, 33, 37, 45, 55]
 
@@ -247,8 +247,8 @@ struct SlotSettingsPage: View {
                 Text("Quick-lock: sluit het slot zónder telefoon door 2× op de POWER-knop van het slot te drukken (volgens de officiële app). Het commando wordt na het schrijven teruggelezen, zodat je ziet of het slot de instelling echt heeft overgenomen.")
             }
             Section {
-                stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 0...255) { ble.setLockSleep($0) }
-                stepper("Unlock-sleep", unit: "s", icon: "moon", idx: 30, range: 0...255) { ble.setUnlockSleep($0) }
+                stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 600...86400, step: 60) { ble.setLockSleep($0) }
+                stepper("Unlock-sleep", unit: "s", icon: "moon", idx: 30, range: 600...86400, step: 60) { ble.setUnlockSleep($0) }
             } header: { Text("Slaapstand") } footer: {
                 Text("Hoe lang het slot wacht voordat het in slaap valt. Langer = sneller reageren, meer batterijverbruik.")
             }
@@ -257,7 +257,7 @@ struct SlotSettingsPage: View {
             Section {
                 stepper("Bump-drempel", unit: "mg", icon: "waveform.path", idx: 10, range: 0...255) { ble.setBumpThreshold($0) }
                 stepper("Pulse-drempel", unit: "mg", icon: "hand.tap", idx: 13, range: 0...255) { ble.setPulseTap($0) }
-                stepper("Hamer-drempel", unit: "mg", icon: "hammer", idx: 15, range: 0...2000, step: 10) { ble.setHammer($0) }
+                stepper("Hamer-drempel", unit: "mG", icon: "hammer", idx: 15, range: 0...2000, step: 10) { ble.setHammer($0) }
                 stepper("Jostle-venster", unit: "×100 ms", icon: "waveform", idx: 14, range: 0...50) { ble.setJostle($0) }
             } header: { Text("Schokken & trillingen") } footer: {
                 Text("Drempels in milli-g: lager = gevoeliger.")

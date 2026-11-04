@@ -137,9 +137,37 @@ final class BLEController: NSObject, ObservableObject {
     private func parseSettingReply(_ d: [UInt8]) {
         guard d.count >= 7, d[0] == 0x14, d[1] == 0x03 || d[1] == 0x04 else { return }
         let raw = UInt32(d[3]) | (UInt32(d[4]) << 8) | (UInt32(d[5]) << 16) | (UInt32(d[6]) << 24)
-        let idx = pendingReadIdx ?? Int(d[2])
+        let idx = Int(d[2])
         settingValues[idx] = Int(Int32(bitPattern: raw))
-        replyReceived = true
+        if pendingReadIdx == nil || pendingReadIdx == idx { replyReceived = true }
+    }
+
+    /// CRC-16 (big-endian in the last two bytes) as pc.f.d verifies it.
+    private func crcOK(_ d: [UInt8]) -> Bool {
+        guard d.count >= 4 else { return false }
+        let c = LinkaCrypto.crc16(d, d.count - 2)
+        return d[d.count - 2] == UInt8((c >> 8) & 0xff) && d[d.count - 1] == UInt8(c & 0xff)
+    }
+
+    /// The official app takes the NEXT counter from setting replies (bytes 11..14)
+    /// and ACK/NAK frames (bytes 7..10), not only from 0x12 context frames.
+    /// Only CRC-valid frames are trusted. NAK/ACK also release a waiting read.
+    private func updateCounterFromReply(_ d: [UInt8]) {
+        guard d.count >= 12, d[0] == 0x14, crcOK(d) else { return }
+        func le32(_ i: Int) -> UInt32 {
+            UInt32(d[i]) | (UInt32(d[i+1]) << 8) | (UInt32(d[i+2]) << 16) | (UInt32(d[i+3]) << 24)
+        }
+        switch d[1] {
+        case 3, 4:
+            if d.count >= 15 { let c = le32(11); if c != 0 { ctxCounter = c } }
+        case 6, 7:
+            let c = le32(7)
+            if c != 0 { ctxCounter = c }
+            let idx = Int(le32(3) & 0xff)
+            add(d[1] == 6 ? "ACK cmd \(d[2]) idx \(idx)" : "NAK cmd \(d[2]) idx \(idx)")
+            if d[1] == 7 { replyReceived = true }
+        default: break
+        }
     }
 
     private func parseInfoPacket(_ d: [UInt8]) {
@@ -234,8 +262,9 @@ final class BLEController: NSObject, ObservableObject {
         guard !testing else { return }
         var variants = keyVariants()
         let current = LinkaCrypto.toHex(subkey)
-        variants.sort { ($0.hex.lowercased() == current) && ($1.hex.lowercased() != current) }
-        variants = Array(variants.prefix(4))
+        let good = variants.filter { $0.hex.lowercased() == current }
+        let rest = variants.filter { $0.hex.lowercased() != current }
+        variants = Array((good + rest).prefix(4))
         guard !variants.isEmpty, mac.count == 6 else { add("Auto-test: geen sleutels/mac."); return }
         guard write0002 != nil else { add("Auto-test: geen schrijfkanaal."); return }
         testing = true
@@ -255,7 +284,7 @@ final class BLEController: NSObject, ObservableObject {
                     add("Auto-test gestopt: geen verse teller van het slot."); break
                 }
                 encAccepted = nil
-                let frame = LinkaCrypto.commandFrame(mac: mac, payload: [0, 0],
+                let frame = LinkaCrypto.commandFrame(mac: mac, payload: [27, 7],
                                                      subkey: LinkaCrypto.hex(v.hex), priv: v.priv, counter: c)
                 add("[TEST \(idx)/\(variants.count)] key=\(v.name) ctr=\(c)")
                 lastUsedCounter = c
@@ -342,12 +371,16 @@ final class BLEController: NSObject, ObservableObject {
         state = "gestopt"; ready = false; rssi = nil
     }
 
+    private var rssiPolling = false
     private func startRSSIPolling() {
+        guard !rssiPolling else { return }
+        rssiPolling = true
         Task {
             while ready, let p = peripheral {
                 p.readRSSI()
                 try? await Task.sleep(nanoseconds: 700_000_000)
             }
+            rssiPolling = false
         }
     }
 
@@ -371,7 +404,7 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func setQuickLock(_ on: Bool)   { put(55, on ? 1 : 0, on ? "Quick-lock aan" : "Quick-lock uit") }
-    func setAudio(_ on: Bool)       { put(12, on ? 1 : 0, on ? "Geluid aan" : "Geluid uit") }
+    func setAudio(_ on: Bool)       { put(12, on ? 3 : 0, on ? "Geluid aan" : "Geluid uit") }
     func setBumpThreshold(_ v: Int) { put(10, v, "Bump-drempel \(v) mg") }
     func setStallCurrent(_ v: Int)  { put(5, v, "Stall-stroom \(v) mA") }
     func setStallDelay(_ v: Int)    { put(45, v, "Stall-vertraging \(v)") }
@@ -382,13 +415,14 @@ final class BLEController: NSObject, ObservableObject {
     func setJostle(_ v: Int)        { put(14, v, "Jostle \(v)") }
     func setAlarmDelay(_ v: Int)    { put(7, v, "Alarm-vertraging \(v) s") }
     func setAlarmTime(_ v: Int)     { put(37, v, "Alarm-duur \(v) s") }
-    func setLockSleep(_ v: Int)     { put(17, v, "Lock-sleep \(v) s") }
+    func setLockSleep(_ v: Int)     { put(17, max(600, v), "Lock-sleep \(max(600, v)) s") }
     func setAccelDataRate(_ v: Int) { put(16, v, "Accel-datarate \(v)") }
     func setPulseTap(_ v: Int)      { put(13, v, "Pulse-drempel \(v) mg") }
     func setPAC(_ code: Int)        { put(1, code, "PAC-code instellen") }
     /// Unlock sleep: the official app writes both index 30 and 50. The lock
     /// hands us a fresh counter after the first, so send the second shortly after.
     func setUnlockSleep(_ v: Int) {
+        let v = max(600, v)
         sendPayload(LinkaCrypto.settingPayload(idx: 30, value: v), name: "Unlock-sleep \(v) s")
         Task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -398,7 +432,12 @@ final class BLEController: NSObject, ObservableObject {
         }
     }
     /// Raw parameter write — for advanced/experimental settings.
-    func writeSetting(idx: Int, value: Int) { put(idx, value, "Param \(idx) = \(value)") }
+    func writeSetting(idx: Int, value: Int) {
+        // Never expose identity / key / bonding / bootloader / motor-code slots.
+        let blocked: Set<Int> = [0, 4, 19, 21, 22, 23, 24, 25, 26, 34, 46, 54]
+        guard !blocked.contains(idx) else { add("Param \(idx) is geblokkeerd (veiligheid)."); return }
+        put(idx, value, "Param \(idx) = \(value)")
+    }
 
     // MARK: Commands (opcodes from the firmware command map)
     func sirenOn()         { sendPayload([14, 60], name: "Sirene") }
@@ -426,6 +465,7 @@ final class BLEController: NSObject, ObservableObject {
                     try? await Task.sleep(nanoseconds: 250_000_000); waited += 1
                 }
                 guard ready else { break }
+                if ctxCounter == lastUsedCounter { add("Teller niet ververst — lezen gestopt."); break }
                 pendingReadIdx = idx
                 replyReceived = false
                 awaitingRead = "Param \(idx)"
@@ -460,8 +500,7 @@ final class BLEController: NSObject, ObservableObject {
         }
         let frame = LinkaCrypto.commandFrame(mac: mac, payload: payload, subkey: subkey, priv: priv, counter: useCounter)
         let type: CBCharacteristicWriteType = ch.properties.contains(.write) ? .withResponse : .withoutResponse
-        encAccepted = nil; vstateChanged = false
-        if !quiet { commandResult = nil }
+        if !quiet { encAccepted = nil; vstateChanged = false; commandResult = nil }
         add("→ \(name) (ctr \(useCounter)): \(LinkaCrypto.toHex(frame))")
         lastUsedCounter = useCounter
         peripheral?.writeValue(Data(frame), for: ch, type: type)
@@ -519,6 +558,7 @@ extension BLEController: CBCentralManagerDelegate {
             ready = false; state = "verbroken"; add("Verbinding verbroken.")
             didInitialStatusPing = false
             lastUsedCounter = nil
+            ctxCounter = nil; ctxEncVer = nil
             // Auto-reconnect unless the user intentionally stopped.
             if !intentionalStop, subkey.count == 16, mac.count == 6 {
                 try? await Task.sleep(nanoseconds: 600_000_000)
@@ -582,6 +622,7 @@ extension BLEController: CBPeripheralDelegate {
             // Decode live telemetry: 0x0A motion/info packet, 0x02 status frame.
             parseInfoPacket(data)
             parseSettingReply(data)
+            updateCounterFromReply(data)
             parseStatusFrame(data)
             // The command context is the 0x12-prefixed frame (encVer 2).
             if data.count >= 7, data[0] == 0x12 {
