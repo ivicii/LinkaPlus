@@ -245,18 +245,26 @@ struct SlotSettingsPage: View {
 
         case .behaviour:
             Section {
-                SettingToggleRow(title: "Quick-lock", icon: "bolt.horizontal", idx: 102,
-                                 ble: ble, enabled: connected) { ble.setQuickLock($0) }
+                SettingToggleRow(title: "Quick-lock", icon: "bolt.horizontal", idx: 55,
+                                 ble: ble, enabled: connected) { ble.setAllowUnconnLock($0) }
                 SettingToggleRow(title: "Geluid & pieptonen", icon: "speaker.wave.2", idx: 12,
                                  ble: ble, enabled: connected) { ble.setAudio($0) }
             } header: { Text("Slot") } footer: {
-                Text("Quick-lock: sluit het slot door 2× op de POWER-knop te drukken (zelfde instelling als de officiële app, index 102). Na schrijven wordt teruggelezen of het slot hem heeft overgenomen.")
+                Text("Quick-lock: sluit het slot door de POWER-knop lang in te drukken, ook zonder telefoon (firmware ALLOW_UNCONN_LOCK, index 55).")
             }
             Section {
-                SettingToggleRow(title: "Sluiten zonder verbinding", icon: "lock.badge.clock", idx: 55,
-                                 ble: ble, enabled: connected) { ble.setAllowUnconnLock($0) }
+                Toggle(isOn: Binding(
+                    get: { ble.autoUnlockEnabled },
+                    set: { v in ble.autoUnlockEnabled = v; LockPrefs.setBool(v, key: "autoUnlock", serial: serial) }
+                )) { Label("Auto-unlock", systemImage: "hand.tap") }
             } footer: {
-                Text("Firmware-instelling ALLOW_UNCONN_LOCK (index 55): of het slot ook mag sluiten als er geen telefoon verbonden is.")
+                Text("Druk op de knop van het slot terwijl je telefoon verbonden is → de app opent het slot (zoals in de officiële app). Werkt alleen als LinkaPlus verbonden is. Standaard uit.")
+            }
+            Section {
+                SettingToggleRow(title: "LINKA ‘Quick Lock’ (index 102)", icon: "bolt.badge.clock", idx: 102,
+                                 ble: ble, enabled: connected) { ble.setQuickLock($0) }
+            } header: { Text("Geavanceerd") } footer: {
+                Text("De schakelaar die de officiële app ‘Quick Lock’ noemt (20 = aan). Effect op de LEO2 nog onbevestigd.")
             }
             Section {
                 stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 600...86400, step: 60) { ble.setLockSleep($0) }

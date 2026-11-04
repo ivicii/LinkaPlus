@@ -57,6 +57,12 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var lockStateText: String?
     private var prevFlagSet: Set<String> = []
     private var selfSirenUntil = Date.distantPast
+    /// Status "reason" byte[16] (rc/d). The official app unlocks on reason 10
+    /// (Linka.updateFromStatusData → doUnlock) when auto-unlock is on.
+    @Published private(set) var lockReason: Int?
+    /// Opt-in: unlock when the lock's button is pressed while this phone is connected.
+    @Published var autoUnlockEnabled = false
+    private var lastAutoUnlock = Date.distantPast
 
     /// Flags that warrant a push notification, with their notification text.
     private static let notifyFlags: [String: (String, String)] = [
@@ -127,6 +133,19 @@ final class BLEController: NSObject, ObservableObject {
         case 7: lockStateText = "Vergrendeld (PAC)"
         case 8: lockStateText = "Ontgrendeld (PAC)"
         default: lockStateText = "Onbekend (\(d[2]))"
+        }
+        // Reason byte[16]: rising edge of 10 = button press asking for unlock.
+        if d.count >= 17 {
+            let r = Int(d[16])
+            if r != lockReason {
+                add("Status-reden: \(r)")
+                if r == 10, autoUnlockEnabled, Date().timeIntervalSince(lastAutoUnlock) > 10 {
+                    lastAutoUnlock = Date()
+                    add("Auto-unlock: knopdruk gedetecteerd → openen")
+                    unlock()
+                }
+                lockReason = r
+            }
         }
         // Status flags bitfield at bytes[12..15] (little-endian).
         if d.count >= 16 {

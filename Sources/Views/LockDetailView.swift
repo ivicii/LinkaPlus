@@ -134,6 +134,7 @@ struct LockDetailView: View {
             if didInitialLoad { await startBLE(); return }
             didInitialLoad = true
             localActs = LocalActivityLog.load(serial: lock.serial_no)
+            ble.autoUnlockEnabled = LockPrefs.bool("autoUnlock", serial: lock.serial_no)
             LockNotifier.shared.requestAuth()
             heroLocked = ble.liveLocked ?? lock.is_locked ?? true
             loc.start()
@@ -518,6 +519,9 @@ struct LockDetailView: View {
             }
             if let r = ble.infoRSSIpkt {
                 statusRow("Signaal (pakket)", value: "\(r) dBm", systemImage: "antenna.radiowaves.left.and.right")
+            }
+            if let r = ble.lockReason {
+                statusRow("Laatste status-reden", value: "\(r)", systemImage: "info.circle")
             }
             if let op = ble.netOperator {
                 statusRow("Mobiel netwerk", value: op + (ble.netCSQ.map { " · \($0)/31" } ?? ""),
