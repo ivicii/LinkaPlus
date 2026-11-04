@@ -9,8 +9,8 @@ struct BLEControlView: View {
     @Environment(\.dismiss) var dismiss
     private let api = APIClient()
 
-    @StateObject private var ble = BLEController()
-    @State private var keyLoaded = false
+    @ObservedObject private var ble = BLEController.shared
+    @State private var keyLoaded = BLEController.shared.ready
     @State private var loadError: String?
     @State private var channel = 0
     @State private var counterOffset = 0
@@ -97,7 +97,7 @@ struct BLEControlView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Sluit") { ble.stop(); dismiss() }
+                    Button("Sluit") { dismiss() }
                 }
             }
         }

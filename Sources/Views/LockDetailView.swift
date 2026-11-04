@@ -24,7 +24,7 @@ struct LockDetailView: View {
     @State private var showBLE = false
     @State private var showBLEControl = false
 
-    @StateObject private var ble = BLEController()
+    @ObservedObject private var ble = BLEController.shared
     @State private var bleStarted = false
     @State private var bleKeyError: String?
     @State private var showFinder = false

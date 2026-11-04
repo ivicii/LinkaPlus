@@ -303,6 +303,8 @@ final class BLEController: NSObject, ObservableObject {
     private var write0016: CBCharacteristic?
 
     func configure(keys: AccessKeys, serial: String, nameHint: String?) {
+        UserDefaults.standard.set(serial, forKey: Self.lastSerialKey)
+        UserDefaults.standard.set(nameHint, forKey: Self.lastNameKey)
         allKeys = keys
         mac = LinkaCrypto.macBytes(serial) ?? []
         self.nameHint = nameHint
@@ -401,9 +403,34 @@ final class BLEController: NSObject, ObservableObject {
         }
     }
 
-    override init() {
+    /// App-wide controller: the Bluetooth link lives as long as the app, not as
+    /// long as one screen, and iOS may relaunch the app for it (state restoration).
+    static let shared = BLEController(restoring: true)
+
+    private static let restoreID = "com.ivoroo.linkaplus.central"
+    private static let lastSerialKey = "ble_lastSerial"
+    private static let lastNameKey = "ble_lastName"
+    private static let lastPeripheralKey = "ble_lastPeripheral"
+
+    init(restoring: Bool = false) {
         super.init()
-        central = CBCentralManager(delegate: self, queue: .main)
+        var opts: [String: Any] = [:]
+        if restoring { opts[CBCentralManagerOptionRestoreIdentifierKey] = Self.restoreID }
+        central = CBCentralManager(delegate: self, queue: .main, options: opts)
+        // After a background relaunch: reload the cached key so we can act at once.
+        if restoring, let serial = UserDefaults.standard.string(forKey: Self.lastSerialKey),
+           let keys = LockCache.loadKeys(serial: serial), keys.commandKey != nil {
+            configure(keys: keys, serial: serial, nameHint: UserDefaults.standard.string(forKey: Self.lastNameKey))
+        }
+    }
+
+    /// Ask iOS to connect whenever the lock shows up — a pending connect never
+    /// times out and also completes while the app is in the background.
+    private func connectPending(_ p: CBPeripheral) {
+        peripheral = p
+        p.delegate = self
+        state = "verbinden"
+        central.connect(p, options: nil)
     }
 
     deinit {
@@ -444,8 +471,16 @@ final class BLEController: NSObject, ObservableObject {
         }
         guard central.state == .poweredOn else { add("Bluetooth niet aan."); return }
         // Avoid overlapping scans/connects from auto-reconnect + UI buttons.
-        guard state != "scannen", state != "verbinden", state != "services" else { return }
+        guard !ready, state != "scannen", state != "verbinden", state != "services" else { return }
         intentionalStop = false
+        // Known lock → pending connect (works in the background too); else scan.
+        if let s = UserDefaults.standard.string(forKey: Self.lastPeripheralKey), let id = UUID(uuidString: s),
+           let p = central.retrievePeripherals(withIdentifiers: [id]).first {
+            ready = false
+            add("Wachten op slot (automatisch verbinden)…")
+            connectPending(p)
+            return
+        }
         state = "scannen"; ready = false
         add("Scannen naar slot…")
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
@@ -634,8 +669,13 @@ extension BLEController: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         Task { @MainActor in
             if central.state == .poweredOn {
-                // Bluetooth came back on — resume unless the user stopped on purpose.
-                if !intentionalStop, !ready, subkey.count == 16, mac.count == 6 { start() }
+                // Bluetooth came back on (or relaunch) — resume unless stopped on purpose.
+                if let p = peripheral, p.state == .connected, !ready {
+                    p.delegate = self; state = "services"
+                    p.discoverServices([LinkaBLE.service, CBUUID(string: "180A"), CBUUID(string: "180F")])
+                } else if !intentionalStop, !ready, subkey.count == 16, mac.count == 6 {
+                    state = "idle"; start()
+                }
             } else {
                 add("BT status \(central.state.rawValue)")
             }
@@ -659,8 +699,26 @@ extension BLEController: CBCentralManagerDelegate {
             }
         }
     }
+    nonisolated func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+        let restored = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first
+        Task { @MainActor in
+            guard let p = restored else { return }
+            add("Hersteld door iOS (achtergrond).")
+            peripheral = p
+            p.delegate = self
+            state = p.state == .connected ? "services" : "verbinden"
+        }
+    }
+    nonisolated func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        Task { @MainActor in
+            add("Verbinden mislukt — opnieuw wachten.")
+            if !intentionalStop { connectPending(peripheral) }
+        }
+    }
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        Task { @MainActor in state = "services"; peripheral.discoverServices([LinkaBLE.service, CBUUID(string: "180A"), CBUUID(string: "180F")]) }
+        Task { @MainActor in
+            UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: Self.lastPeripheralKey)
+            state = "services"; peripheral.discoverServices([LinkaBLE.service, CBUUID(string: "180A"), CBUUID(string: "180F")]) }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
@@ -669,10 +727,10 @@ extension BLEController: CBCentralManagerDelegate {
             lastUsedCounter = nil
             if proximityUnlockEnabled, liveLocked == true { awayLatched = true; nearCount = 0 }
             ctxCounter = nil; ctxEncVer = nil
-            // Auto-reconnect unless the user intentionally stopped.
+            // Auto-reconnect unless stopped on purpose: a pending connect that iOS
+            // completes as soon as the lock is back in range — also in the background.
             if !intentionalStop, subkey.count == 16, mac.count == 6 {
-                try? await Task.sleep(nanoseconds: 600_000_000)
-                if !intentionalStop && !ready { start() }
+                connectPending(peripheral)
             }
         }
     }
