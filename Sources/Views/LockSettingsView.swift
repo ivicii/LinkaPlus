@@ -247,24 +247,12 @@ struct SlotSettingsPage: View {
             Section {
                 SettingToggleRow(title: "Quick-lock", icon: "bolt.horizontal", idx: 55,
                                  ble: ble, enabled: connected) { ble.setAllowUnconnLock($0) }
+                SettingToggleRow(title: "Auto-unlock", icon: "hand.tap", idx: 102,
+                                 ble: ble, enabled: connected) { ble.setQuickLock($0) }
                 SettingToggleRow(title: "Geluid & pieptonen", icon: "speaker.wave.2", idx: 12,
                                  ble: ble, enabled: connected) { ble.setAudio($0) }
-            } header: { Text("Slot") } footer: {
-                Text("Quick-lock: sluit het slot door de POWER-knop lang in te drukken, ook zonder telefoon (firmware ALLOW_UNCONN_LOCK, index 55).")
-            }
-            Section {
-                Toggle(isOn: Binding(
-                    get: { ble.autoUnlockEnabled },
-                    set: { v in ble.autoUnlockEnabled = v; LockPrefs.setBool(v, key: "autoUnlock", serial: serial) }
-                )) { Label("Auto-unlock", systemImage: "hand.tap") }
-            } footer: {
-                Text("Druk op de knop van het slot terwijl je telefoon verbonden is → de app opent het slot (zoals in de officiële app). Werkt alleen als LinkaPlus verbonden is. Standaard uit.")
-            }
-            Section {
-                SettingToggleRow(title: "Auto-lock (index 102)", icon: "bolt.badge.clock", idx: 102,
-                                 ble: ble, enabled: connected) { ble.setQuickLock($0) }
-            } header: { Text("Geavanceerd") } footer: {
-                Text("In de officiële app ‘settings_auto_lock’ (schrijft 20 = aan, 0 = uit; bij teruglezen logt die app ‘Quick Lock checked’). Wat 20 precies betekent (vermoedelijk seconden) is nog onbevestigd. Auto-unlock staat níet in het slot: dat is puur app-logica.")
+            } header: { Text("Knop & geluid") } footer: {
+                Text("Quick-lock: POWER-knop lang indrukken sluit het slot, ook zonder telefoon (index 55).\nAuto-unlock: POWER-knop lang indrukken opent én sluit, maar alleen als je telefoon via Bluetooth verbonden is (index 102).")
             }
             Section {
                 stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 600...86400, step: 60) { ble.setLockSleep($0) }
