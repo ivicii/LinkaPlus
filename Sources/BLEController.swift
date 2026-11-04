@@ -70,6 +70,15 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var awayLatched = false
     private var nearCount = 0
     private var lastAutoUnlock = Date.distantPast
+    /// Motor in motion per status frame (1 = locking, 2 = unlocking), like the
+    /// official CircleView (pulses while isLocking/isUnlocking).
+    enum Motion: Equatable { case locking, unlocking }
+    @Published private(set) var motion: Motion?
+    /// Measured motor time (s) from state 1/2 to 3/4, remembered across runs.
+    @Published private(set) var motorDuration: Double = {
+        let v = UserDefaults.standard.double(forKey: "motorDuration"); return v > 0 ? v : 1.5
+    }()
+    private var motionStart: Date?
 
     /// Flags that warrant a push notification, with their notification text.
     private static let notifyFlags: [String: (String, String)] = [
@@ -125,9 +134,19 @@ final class BLEController: NSObject, ObservableObject {
         // rc/b mapping (confirmed from APK packed-switch 0..8):
         // Like the official app (Linka.updateFromStatusData): 3/7 = locked, 4/8 = unlocked.
         switch Int(d[2]) {
-        case 3, 7: liveLocked = true
-        case 4, 8: liveLocked = false
-        default: break
+        case 1: if motion != .locking { motion = .locking; motionStart = Date() }
+        case 2: if motion != .unlocking { motion = .unlocking; motionStart = Date() }
+        case 3, 7, 4, 8:
+            if let s = motionStart {
+                let t = Date().timeIntervalSince(s)
+                if t > 0.3 && t < 8 {
+                    motorDuration = t
+                    UserDefaults.standard.set(t, forKey: "motorDuration")
+                }
+            }
+            motionStart = nil; motion = nil
+            liveLocked = (d[2] == 3 || d[2] == 7)
+        default: motion = nil; motionStart = nil
         }
         switch Int(d[2]) {
         case 0: lockStateText = "Opstarten"

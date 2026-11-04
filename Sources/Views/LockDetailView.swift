@@ -741,8 +741,19 @@ struct LockDetailView: View {
 
     private var heroSubtitle: String {
         if !ble.ready { return "Ga dichtbij je slot om het te bedienen" }
+        if ble.motion == .locking { return "Vergrendelen…" }
+        if ble.motion == .unlocking { return "Ontgrendelen…" }
         guard let k = knownLocked else { return "Tik op het slot om te openen of te sluiten" }
         return k ? "Tik op het slot om te openen" : "Tik op het slot om te sluiten"
+    }
+
+    /// Bar position: follows the motor while it runs, else the known state.
+    private var barClosed: Bool {
+        switch ble.motion {
+        case .locking: return true
+        case .unlocking: return false
+        case nil: return heroLocked
+        }
     }
 
     private func heroControl(size: CGFloat) -> some View {
@@ -753,11 +764,13 @@ struct LockDetailView: View {
             Button {
                 Haptic.tap()
                 let locked = heroLocked
-                heroLocked = !locked
+                // No optimistic flip: the bar follows the lock's own status
+                // (locking/unlocking → locked/unlocked), like the official app.
                 ble.channel = 0; ble.counterOffset = 0
                 if locked { ble.unlock() } else { ble.lock() }
             } label: {
-                LockGraphic(locked: heroLocked, color: heroColor, size: size)
+                LockGraphic(locked: barClosed, color: heroColor, size: size,
+                            moving: ble.motion != nil, duration: ble.motorDuration)
                     .accessibilityHidden(true)
             }
             .buttonStyle(PressableStyle())
@@ -859,7 +872,7 @@ struct LockDetailView: View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
                 Button {
-                    Haptic.tap(.light); heroLocked = false
+                    Haptic.tap(.light)
                     ble.channel = 0; ble.counterOffset = 0; ble.unlock()
                 } label: {
                     Label("Openen", systemImage: "lock.open.fill").frame(maxWidth: .infinity)
@@ -867,7 +880,7 @@ struct LockDetailView: View {
                 .buttonStyle(.borderedProminent).tint(Theme.open)
                 .disabled(knownLocked == false)   // already open
                 Button {
-                    Haptic.tap(.light); heroLocked = true
+                    Haptic.tap(.light)
                     ble.channel = 0; ble.counterOffset = 0; ble.lock()
                 } label: {
                     Label("Sluiten", systemImage: "lock.fill").frame(maxWidth: .infinity)
