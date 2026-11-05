@@ -137,7 +137,7 @@ struct APIClient {
         try throwIfHTTPError(http, data)
         // Any success envelope with data present → active.
         if let env = try? JSONDecoder().decode(APIEnvelope<CurrentTracking>.self, from: data) {
-            return env.isSuccess && (env.data?.activities.isEmpty == false || env.message == nil)
+            return env.isSuccess && ((env.data?.activities?.isEmpty == false) || env.message == nil)
         }
         return false
     }
