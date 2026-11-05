@@ -127,6 +127,21 @@ struct APIClient {
         _ = try await sendExpectingStatus(req)
     }
 
+    /// Whether a tracking/recovery session is currently active on the server.
+    func currentActive(serial: String, auth: Identity) async throws -> Bool {
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("/api/leo/current_active"))
+        req.httpMethod = "POST"
+        setForm(["lock_serial_no": serial], on: &req)
+        authorize(&req, auth: auth)
+        let (data, http) = try await rawSend(req)
+        try throwIfHTTPError(http, data)
+        // Any success envelope with data present → active.
+        if let env = try? JSONDecoder().decode(APIEnvelope<CurrentTracking>.self, from: data) {
+            return env.isSuccess && (env.data?.activities.isEmpty == false || env.message == nil)
+        }
+        return false
+    }
+
     /// Live tracking points for the current recovery session. Throws when the
     /// lock is not in tracking mode (server replies "Not currently theft").
     func currentTracking(serial: String, auth: Identity) async throws -> [LockActivity] {

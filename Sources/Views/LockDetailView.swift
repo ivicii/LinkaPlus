@@ -693,16 +693,11 @@ struct LockDetailView: View {
             }
 
             Section("Locatie & data") {
-                NavigationLink {
-                    List { trackingSection }
-                        .navigationTitle("Tracking").navigationBarTitleDisplayMode(.inline)
-                .alert("Tracking-/recovery-modus aanzetten?", isPresented: $confirmEnable) {
-                    Button("Annuleer", role: .cancel) {}
-                    Button("Aanzetten", role: .destructive) { setRecovery(true) }
-                } message: {
-                    Text("Dit is de anti-diefstalstand. Je slot gaat continu zijn GPS-positie doorsturen (meer batterij- en dataverbruik). Je kunt het weer uitzetten.")
+                if let serial = lock.serial_no {
+                    NavigationLink {
+                        TrackingTestView(serial: serial)
+                    } label: { Label("Tracking & recovery", systemImage: "dot.radiowaves.left.and.right") }
                 }
-                } label: { Label("Tracking & recovery", systemImage: "dot.radiowaves.left.and.right") }
                 NavigationLink {
                     List { dataplanSection }
                         .navigationTitle("Dataplan").navigationBarTitleDisplayMode(.inline)
@@ -770,11 +765,7 @@ struct LockDetailView: View {
                 NavigationLink {
                     SlotSettingsPage(kind: .maintenance, ble: ble, serial: lock.serial_no)
                 } label: { Label("Onderhoud & uitlezen", systemImage: "wrench") }
-                if let serial = lock.serial_no {
-                    NavigationLink {
-                        TrackingTestView(serial: serial)
-                    } label: { Label("Tracking-test", systemImage: "location.viewfinder") }
-                }
+
             }
             geavanceerdSection
         }

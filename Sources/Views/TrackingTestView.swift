@@ -1,140 +1,170 @@
 import SwiftUI
+import MapKit
 import UIKit
 
-/// Live test of the lock's cellular/GPS tracking: turns on recovery mode, then
-/// polls the LINKA server for new positions and shows what the lock's modem and
-/// GPS are doing (from the Bluetooth debug log).
+/// Theft tracking via LINKA's recovery mode — the way the official app does it,
+/// but it only arms once Bluetooth confirms the lock is awake (so the server can
+/// reach it), keeps recovery ON until you stop, and maps the points it receives
+/// (polls current_tracking every 10 s, like the official TrackingActiveFragment).
 struct TrackingTestView: View {
     let serial: String
     @EnvironmentObject var session: SessionStore
     @ObservedObject private var ble = BLEController.shared
     private let api = APIClient()
 
-    @State private var running = false
+    @State private var armed = false
+    @State private var arming = false
     @State private var started: Date?
-    @State private var checks: [String] = []
-    @State private var points = 0
-    @State private var lastPoint: String?
-    @State private var lastLockLoc: String?
-    @State private var task: Task<Void, Never>?
-    @State private var minutes = 10
+    @State private var points: [CLLocationCoordinate2D] = []
+    @State private var lastUpdate: Date?
+    @State private var status: String?
+    @State private var showLog = false
+    @State private var loop: Task<Void, Never>?
 
-    /// Modem/GPS lines from the firmware log, newest first.
+    /// Lock is reachable right now: BLE-connected means it is awake, so the
+    /// server's recovery command will arrive. We also refresh it with a ping.
+    private var lockAwake: Bool { ble.ready }
+
     private var modemLines: [String] {
-        let keys = ["QGPSLOC", "QGPS", "QIOPEN", "SEND OK", "QISEND", "CSQ", "COPS", "CREG", "M_STATE", "Get Loc", "CME ERROR", "QIRD"]
-        return ble.log.filter { l in keys.contains { l.contains($0) } }.prefix(25).map { $0 }
+        let keys = ["QGPSLOC", "QGPS", "QIOPEN", "SEND OK", "QISEND", "CSQ", "CME ERROR"]
+        return ble.log.filter { l in keys.contains { l.contains($0) } }.prefix(20).map { $0 }
     }
-
     private var gpsFix: String? {
-        // +QGPSLOC: <utc>,<lat>,<lon>,... (mode 2 = decimal degrees)
         guard let l = ble.log.first(where: { $0.contains("+QGPSLOC:") }) else { return nil }
-        let parts = l.components(separatedBy: "+QGPSLOC:").last?.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
-        return parts.count >= 3 ? "\(parts[1]), \(parts[2])" : nil
+        let p = l.components(separatedBy: "+QGPSLOC:").last?.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
+        return p.count >= 3 ? "\(p[1]), \(p[2])" : nil
     }
 
     var body: some View {
         List {
+            if armed {
+                Section {
+                    if let last = points.last {
+                        LockMapView(coordinate: last, title: "Laatste positie", route: points)
+                            .frame(height: 220)
+                            .listRowInsets(EdgeInsets())
+                    } else {
+                        HStack { ProgressView(); Text("Wachten op eerste positie van het slot…") }
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section {
-                Stepper("Duur: \(minutes) min", value: $minutes, in: 5...60, step: 5).disabled(running)
-                if running {
-                    Button(role: .destructive) { stop(disable: true) } label: { Label("Stop test (tracking uit)", systemImage: "stop.circle.fill") }
+                if !armed {
+                    Button { arm() } label: {
+                        Label(arming ? "Bezig…" : "Start tracking", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    .disabled(arming || !lockAwake)
                 } else {
-                    Button { start() } label: { Label("Start tracking-test", systemImage: "play.circle.fill") }
+                    Button(role: .destructive) { stop() } label: {
+                        Label("Stop tracking", systemImage: "stop.circle.fill")
+                    }
                 }
             } footer: {
-                Text("Zet tracking-modus aan, leg de fiets buiten (vrij zicht op de lucht) en wacht. De test vraagt elke 30 s de server om nieuwe posities. Verbruikt data van je dataplan.")
+                if !lockAwake && !armed {
+                    Text("Ga bij je slot staan tot LinkaPlus “Verbonden” toont en beweeg het slot even. Pas als het slot wakker is, kan de server de tracking aanzetten (anders krijg je geen bevestigingsmail en geen posities).")
+                        .foregroundStyle(Theme.warn)
+                } else {
+                    Text("Zet LINKA’s recovery-modus aan en houdt die aan tot je stopt. Je krijgt een bevestigingsmail van LINKA. Leg de fiets buiten met vrij zicht op de lucht; de eerste GPS-fix kan enkele minuten duren. Verbruikt data van je dataplan.")
+                }
             }
 
-            Section("Resultaat (server)") {
-                row("Status", running ? "loopt sinds \(started.map { DateUtils.timeHM($0) } ?? "–")" : (checks.isEmpty ? "niet gestart" : "gestopt"))
-                row("Trackingpunten", "\(points)")
-                row("Laatste punt", lastPoint ?? "–")
-                row("Slotlocatie (server)", lastLockLoc ?? "–")
+            Section("Status") {
+                row("Tracking", armed ? "aan sinds \(started.map { DateUtils.timeHM($0) } ?? "–")" : "uit")
+                row("Posities ontvangen", "\(points.count)")
+                row("Laatste update", lastUpdate.map { DateUtils.timeHM($0) } ?? "–")
+                if let last = points.last {
+                    row("Laatste positie", String(format: "%.5f, %.5f", last.latitude, last.longitude))
+                }
+                if let status { row("Server", status) }
             }
 
             Section {
-                row("Bluetooth", ble.ready ? "verbonden" : "niet verbonden")
+                row("Bluetooth", ble.ready ? "verbonden (slot wakker)" : "niet verbonden")
                 row("GPS-fix (slot)", gpsFix ?? "nog geen")
                 row("Netwerk", ble.netOperator.map { $0 + (ble.netCSQ.map { " · \($0)/31" } ?? "") } ?? "–")
-                ForEach(Array(modemLines.enumerated()), id: \.offset) { _, l in
-                    Text(l).font(.system(.caption2, design: .monospaced))
-                }
-            } header: { Text("Slot live (via Bluetooth)") } footer: {
-                Text("‘CME ERROR: 516’ bij QGPSLOC = nog geen GPS-fix. ‘SEND OK’ = het slot heeft data naar de LINKA-server gestuurd.")
-            }
-
-            if !checks.isEmpty {
-                Section("Verloop") {
-                    ForEach(Array(checks.reversed().enumerated()), id: \.offset) { _, c in
-                        Text(c).font(.caption)
+                DisclosureGroup(isExpanded: $showLog) {
+                    ForEach(Array(modemLines.enumerated()), id: \.offset) { _, l in
+                        Text(l).font(.system(.caption2, design: .monospaced))
                     }
                     Button {
-                        let text = (checks + ["", "Modem:"] + modemLines.reversed()).joined(separator: "\n")
-                        UIPasteboard.general.string = text
+                        UIPasteboard.general.string = modemLines.reversed().joined(separator: "\n")
                         Haptic.tap(.light)
-                    } label: { Label("Kopieer testverslag", systemImage: "doc.on.doc") }
-                }
+                    } label: { Label("Kopieer modemlog", systemImage: "doc.on.doc") }
+                } label: { Text("Slot live (diagnose)").font(.subheadline) }
+            } header: { Text("Slot") } footer: {
+                Text("‘CME ERROR: 516’ = nog geen GPS-fix. ‘SEND OK’ = het slot stuurt data naar LINKA.")
             }
         }
-        .navigationTitle("Tracking-test")
+        .navigationTitle("Tracking (recovery)")
         .navigationBarTitleDisplayMode(.inline)
-        .onDisappear { task?.cancel() }
+        .onAppear { checkActive() }
+        .onDisappear { loop?.cancel() }
     }
 
     private func row(_ t: String, _ v: String) -> some View {
         HStack { Text(t); Spacer(); Text(v).foregroundStyle(.secondary).multilineTextAlignment(.trailing) }
     }
 
-    private func note(_ s: String) { checks.append("\(DateUtils.timeHM(Date())) \(s)") }
-
-    private func start() {
-        running = true; started = Date(); checks = []; points = 0; lastPoint = nil
+    private func checkActive() {
         let auth = session.identity()
-        let total = minutes
-        task = Task {
-            do {
-                try await api.setRecoveryMode(serial: serial, enabled: true, auth: auth)
-                note("Tracking-modus aangezet.")
-            } catch {
-                note("Aanzetten mislukt: \((error as? LocalizedError)?.errorDescription ?? "\(error)")")
+        Task {
+            if (try? await api.currentActive(serial: serial, auth: auth)) == true {
+                armed = true; started = started ?? Date(); startPolling()
             }
-            let end = Date().addingTimeInterval(Double(total) * 60)
-            while !Task.isCancelled && Date() < end {
-                do {
-                    let acts = try await api.currentTracking(serial: serial, auth: auth)
-                    if acts.count != points {
-                        note("Server: \(acts.count) punt(en).")
-                    }
-                    points = acts.count
-                    if let a = acts.first(where: { $0.hasLocation }), let lat = a.latitude, let lon = a.longitude {
-                        let t = DateUtils.parseAny(a.timestamp) ?? DateUtils.parseISO(a.createdAt)
-                        lastPoint = String(format: "%.5f, %.5f", lat, lon) + (t.map { " · " + DateUtils.timeHM($0) } ?? "")
-                    }
-                } catch {
-                    note("Server: \((error as? LocalizedError)?.errorDescription ?? "\(error)")")
-                }
-                if let l = try? await api.lockSingle(serial: serial, auth: auth), let lat = l.latitude, let lon = l.longitude {
-                    let t = DateUtils.parseAny(l.modifiedAt)
-                    lastLockLoc = String(format: "%.5f, %.5f", lat, lon) + (t.map { " · " + DateUtils.relative($0) } ?? "")
-                }
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
-            }
-            if !Task.isCancelled { note("Testtijd voorbij."); stop(disable: true) }
         }
     }
 
-    private func stop(disable: Bool) {
-        task?.cancel(); task = nil
-        running = false
-        guard disable else { return }
+    private func arm() {
+        guard lockAwake else { return }
+        arming = true; status = nil
+        // Keep the lock awake for the moment the server reaches it.
+        ble.statePing()
         let auth = session.identity()
         Task {
             do {
-                try await api.setRecoveryMode(serial: serial, enabled: false, auth: auth)
-                note("Tracking-modus uitgezet.")
+                try await api.setRecoveryMode(serial: serial, enabled: true, auth: auth)
+                armed = true; started = Date(); points = []
+                status = "recovery aangezet"
+                startPolling()
             } catch {
-                note("Uitzetten mislukt: \((error as? LocalizedError)?.errorDescription ?? "\(error)")")
+                status = "aanzetten mislukt: \((error as? LocalizedError)?.errorDescription ?? "\(error)")"
             }
+            arming = false
+        }
+    }
+
+    private func startPolling() {
+        loop?.cancel()
+        let auth = session.identity()
+        loop = Task {
+            while !Task.isCancelled && armed {
+                do {
+                    let acts = try await api.currentTracking(serial: serial, auth: auth)
+                    let pts = acts.compactMap { a -> (Date, CLLocationCoordinate2D)? in
+                        guard a.hasLocation, let lat = a.latitude, let lon = a.longitude else { return nil }
+                        let t = DateUtils.parseAny(a.timestamp) ?? DateUtils.parseISO(a.createdAt) ?? Date.distantPast
+                        return (t, CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                    }.sorted { $0.0 < $1.0 }.map { $0.1 }
+                    if pts.count != points.count { points = pts }
+                    lastUpdate = Date()
+                    status = acts.isEmpty ? "nog geen posities" : "\(acts.count) punt(en)"
+                } catch {
+                    status = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                }
+                try? await Task.sleep(nanoseconds: 10_000_000_000)   // 10 s, like the official app
+            }
+        }
+    }
+
+    private func stop() {
+        loop?.cancel(); loop = nil
+        armed = false
+        let auth = session.identity()
+        Task {
+            do { try await api.setRecoveryMode(serial: serial, enabled: false, auth: auth); status = "recovery uitgezet" }
+            catch { status = "uitzetten mislukt: \((error as? LocalizedError)?.errorDescription ?? "\(error)")" }
         }
     }
 }
