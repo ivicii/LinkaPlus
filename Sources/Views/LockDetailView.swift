@@ -34,11 +34,13 @@ struct LockDetailView: View {
     @State private var renameText = ""
     @State private var showSettings = false
     @State private var showFullMap = false
+    @State private var showParkedSheet = false
     @State private var showFirmware = false
     @State private var heroLocked = true
     @State private var didInitialLoad = false
     @State private var localActs: [LockActivity] = []
     @State private var lastKnownLock: Bool?
+    @State private var parked: ParkedStore.Spot?
 
     /// Cloud feed + locally recorded events (cloud is rarely updated now).
     private var allActivities: [LockActivity] {
@@ -109,7 +111,10 @@ struct LockDetailView: View {
             VStack(spacing: 0) {
                 if !compact {
                     compactMap
+                    if let parked { parkedCard(parked) }
                     Spacer(minLength: 10)
+                } else if let parked {
+                    parkedCard(parked)
                 }
                 heroControl(size: lockSize)
                 Spacer(minLength: 10)
@@ -134,6 +139,7 @@ struct LockDetailView: View {
             if didInitialLoad { await startBLE(); return }
             didInitialLoad = true
             localActs = LocalActivityLog.load(serial: lock.serial_no)
+            parked = ParkedStore.load(serial: lock.serial_no)
             ble.proximityUnlockEnabled = LockPrefs.bool("proximityUnlock", serial: lock.serial_no)
             LockNotifier.shared.requestAuth()
             heroLocked = ble.liveLocked ?? lock.is_locked ?? true
@@ -150,6 +156,11 @@ struct LockDetailView: View {
             if let prev = lastKnownLock, prev != v {
                 LocalActivityLog.record(kind: v ? "close" : "open", battery: ble.batteryLevelBLE, serial: lock.serial_no)
                 localActs = LocalActivityLog.load(serial: lock.serial_no)
+                // Lock just closed → remember where the bike is parked (phone's GPS).
+                if v, let here = loc.coordinate {
+                    ParkedStore.save(here, accuracy: loc.accuracy, serial: lock.serial_no)
+                    parked = ParkedStore.load(serial: lock.serial_no)
+                }
             }
             lastKnownLock = v
             maybeAutoUnlock()
@@ -184,6 +195,7 @@ struct LockDetailView: View {
             loadSim()
         }
         .sheet(isPresented: $showFullMap) { fullMapSheet }
+        .sheet(isPresented: $showParkedSheet) { parkedSheet }
         .sheet(isPresented: $showFirmware) {
             FirmwareView(ble: ble).environmentObject(session)
         }
@@ -584,6 +596,53 @@ struct LockDetailView: View {
             Text(ble.ready
                  ? "Via Bluetooth — werkt lokaal, ook zonder dataplan."
                  : "Geluid afspelen werkt betrouwbaar via Bluetooth (dichtbij het slot). De cloud-variant lukt alleen als het slot net online is, anders geeft de server \"not currently active\".")
+        }
+    }
+
+    @ViewBuilder
+    private var parkedSheet: some View {
+        NavigationStack {
+            Group {
+                if let spot = parked {
+                    VStack(spacing: 0) {
+                        LockMapView(coordinate: spot.coordinate, title: "Geparkeerde fiets")
+                            .ignoresSafeArea(edges: .bottom)
+                            .overlay(alignment: .bottom) {
+                                VStack(spacing: 10) {
+                                    HStack(spacing: 10) {
+                                        Button { navigateApple(spot.coordinate, walking: true) } label: {
+                                            Label("Lopen", systemImage: "figure.walk").frame(maxWidth: .infinity)
+                                        }.buttonStyle(.borderedProminent)
+                                        Button { navigateGoogle(spot.coordinate) } label: {
+                                            Label("Google Maps", systemImage: "map").frame(maxWidth: .infinity)
+                                        }.buttonStyle(.bordered)
+                                    }
+                                    Text("Vastgelegd \(DateUtils.absoluteWithRelative(spot.date))"
+                                         + (spot.accuracy > 0 ? String(format: " · ±%.0f m nauwkeurig", spot.accuracy) : ""))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .padding(12)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .padding(12)
+                            }
+                    }
+                } else {
+                    ContentUnavailableView_("Nog geen parkeerplek", "bicycle",
+                        "Zodra je het slot sluit terwijl je telefoon een locatie heeft, wordt die hier bewaard.")
+                }
+            }
+            .navigationTitle("Geparkeerde fiets")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Sluit") { showParkedSheet = false } }
+                ToolbarItem(placement: .destructiveAction) {
+                    if parked != nil {
+                        Button(role: .destructive) {
+                            ParkedStore.clear(serial: lock.serial_no); parked = nil; showParkedSheet = false
+                        } label: { Text("Wissen") }
+                    }
+                }
+            }
         }
     }
 
@@ -1006,6 +1065,47 @@ struct LockDetailView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func parkedCard(_ spot: ParkedStore.Spot) -> some View {
+        let dist: String? = loc.coordinate.map { me in
+            let m = CLLocation(latitude: spot.lat, longitude: spot.lon)
+                .distance(from: CLLocation(latitude: me.latitude, longitude: me.longitude))
+            return m < 1000 ? String(format: "%.0f m", m) : String(format: "%.1f km", m / 1000)
+        }
+        Button { showParkedSheet = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "bicycle.circle.fill")
+                    .font(.title2).foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Geparkeerd").font(.subheadline.weight(.semibold))
+                    Text("\(DateUtils.absoluteWithRelative(spot.date))" + (dist.map { " · \($0)" } ?? ""))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                    .font(.title2).foregroundStyle(Theme.accent)
+            }
+            .padding(.vertical, 10).padding(.horizontal, 14)
+            .background(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .fill(Color(.secondarySystemBackground)))
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 8)
+    }
+
+    private func navigateApple(_ c: CLLocationCoordinate2D, walking: Bool) {
+        let item = MKMapItem(placemark: MKPlacemark(coordinate: c))
+        item.name = "Geparkeerde fiets"
+        item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey:
+            walking ? MKLaunchOptionsDirectionsModeWalking : MKLaunchOptionsDirectionsModeDriving])
+    }
+
+    private func navigateGoogle(_ c: CLLocationCoordinate2D) {
+        let app = URL(string: "comgooglemaps://?daddr=\(c.latitude),\(c.longitude)&directionsmode=walking")!
+        let web = URL(string: "https://www.google.com/maps/dir/?api=1&destination=\(c.latitude),\(c.longitude)&travelmode=walking")!
+        UIApplication.shared.open(UIApplication.shared.canOpenURL(app) ? app : web)
     }
 
     private func statusRow(_ title: String, value: String, systemImage: String) -> some View {

@@ -7,13 +7,15 @@ import CoreLocation
 final class LocationProvider: NSObject, ObservableObject {
     @Published var coordinate: CLLocationCoordinate2D?
     @Published var authorized = false
+    /// Horizontal accuracy (m) of the latest fix, for the parked-location quality.
+    @Published var accuracy: Double = -1
 
     private let manager = CLLocationManager()
 
     override init() {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
     }
 
     func start() {
@@ -24,8 +26,8 @@ final class LocationProvider: NSObject, ObservableObject {
 
 extension LocationProvider: CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let c = locations.last?.coordinate else { return }
-        Task { @MainActor in self.coordinate = c }
+        guard let l = locations.last else { return }
+        Task { @MainActor in self.coordinate = l.coordinate; self.accuracy = l.horizontalAccuracy }
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
