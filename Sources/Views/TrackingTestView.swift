@@ -94,7 +94,7 @@ struct TrackingTestView: View {
         }
         .navigationTitle("Tracking (recovery)")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { checkActive() }
+        .onAppear { restore() }
         .onDisappear { loop?.cancel() }
     }
 
@@ -102,13 +102,22 @@ struct TrackingTestView: View {
         HStack { Text(t); Spacer(); Text(v).foregroundStyle(.secondary).multilineTextAlignment(.trailing) }
     }
 
-    private func checkActive() {
-        let auth = session.identity()
-        Task {
-            if (try? await api.currentActive(serial: serial, auth: auth)) == true {
-                armed = true; started = started ?? Date(); startPolling()
-            }
+    private static func armedKey(_ s: String) -> String { "recoveryArmed_\(s)" }
+
+    /// Reflect what the user themselves started (reliable), not a guessed server state.
+    private func restore() {
+        if UserDefaults.standard.bool(forKey: Self.armedKey(serial)) {
+            armed = true; started = started ?? Date(); startPolling()
         }
+    }
+
+    /// Friendlier wording for the server's tracking status.
+    private func serverText(_ raw: String) -> String {
+        let l = raw.lowercased()
+        if l.contains("not currently") || l.contains("no theft") {
+            return "nog niet actief — wacht tot het slot zich meldt"
+        }
+        return raw
     }
 
     private func arm() {
@@ -120,6 +129,7 @@ struct TrackingTestView: View {
             do {
                 try await api.setRecoveryMode(serial: serial, enabled: true, auth: auth)
                 armed = true; started = Date(); points = []
+                UserDefaults.standard.set(true, forKey: Self.armedKey(serial))
                 status = ble.ready ? "recovery aangezet" : "aangevraagd — wacht tot het slot zich meldt"
                 startPolling()
             } catch {
@@ -143,9 +153,9 @@ struct TrackingTestView: View {
                     }.sorted { $0.0 < $1.0 }.map { $0.1 }
                     if pts.count != points.count { points = pts }
                     lastUpdate = Date()
-                    status = acts.isEmpty ? "nog geen posities" : "\(acts.count) punt(en)"
+                    status = acts.isEmpty ? "nog niet actief — wacht tot het slot zich meldt" : "\(acts.count) punt(en)"
                 } catch {
-                    status = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                    status = serverText((error as? LocalizedError)?.errorDescription ?? "\(error)")
                 }
                 try? await Task.sleep(nanoseconds: 10_000_000_000)   // 10 s, like the official app
             }
@@ -155,6 +165,7 @@ struct TrackingTestView: View {
     private func stop() {
         loop?.cancel(); loop = nil
         armed = false
+        UserDefaults.standard.set(false, forKey: Self.armedKey(serial))
         let auth = session.identity()
         Task {
             do { try await api.setRecoveryMode(serial: serial, enabled: false, auth: auth); status = "recovery uitgezet" }
