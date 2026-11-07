@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import UIKit
+import Foundation
 
 /// Theft tracking via LINKA's recovery mode — the way the official app does it,
 /// but it only arms once Bluetooth confirms the lock is awake (so the server can
@@ -72,7 +73,13 @@ struct TrackingTestView: View {
                 if let last = points.last {
                     row("Laatste positie", String(format: "%.5f, %.5f", last.latitude, last.longitude))
                 }
-                if let status { row("Server", status) }
+                if let status {
+                    HStack(alignment: .top) {
+                        Text("Server"); Spacer()
+                        Text(status).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                            .lineLimit(3)
+                    }
+                }
             }
 
             Section {
@@ -117,7 +124,20 @@ struct TrackingTestView: View {
         if l.contains("not currently") || l.contains("no theft") {
             return "nog niet actief — wacht tot het slot zich meldt"
         }
-        return raw
+        return String(raw.prefix(140))
+    }
+
+    /// Short, human message for an error (no giant NSError dump).
+    private func shortError(_ error: Error) -> String {
+        if let u = error as? URLError {
+            switch u.code {
+            case .networkConnectionLost, .notConnectedToInternet, .timedOut, .cannotConnectToHost:
+                return "netwerk even weg — opnieuw proberen…"
+            default: return "netwerkfout — opnieuw proberen…"
+            }
+        }
+        let d = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        return serverText(d)
     }
 
     private func arm() {
@@ -133,7 +153,7 @@ struct TrackingTestView: View {
                 status = ble.ready ? "recovery aangezet" : "aangevraagd — wacht tot het slot zich meldt"
                 startPolling()
             } catch {
-                status = "aanzetten mislukt: \((error as? LocalizedError)?.errorDescription ?? "\(error)")"
+                status = "aanzetten mislukt: \(shortError(error))"
             }
             arming = false
         }
@@ -155,7 +175,7 @@ struct TrackingTestView: View {
                     lastUpdate = Date()
                     status = acts.isEmpty ? "nog niet actief — wacht tot het slot zich meldt" : "\(acts.count) punt(en)"
                 } catch {
-                    status = serverText((error as? LocalizedError)?.errorDescription ?? "\(error)")
+                    status = shortError(error)
                 }
                 try? await Task.sleep(nanoseconds: 10_000_000_000)   // 10 s, like the official app
             }
