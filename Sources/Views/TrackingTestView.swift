@@ -153,7 +153,8 @@ struct TrackingTestView: View {
                 status = ble.ready ? "recovery aangezet" : "aangevraagd — wacht tot het slot zich meldt"
                 startPolling()
             } catch {
-                status = "aanzetten mislukt: \(shortError(error))"
+                let raw = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                status = "server weigert: \(String(raw.prefix(120)))"
             }
             arming = false
         }
