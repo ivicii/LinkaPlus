@@ -55,23 +55,18 @@ struct TrackingTestView: View {
                     Button { arm() } label: {
                         Label(arming ? "Bezig…" : "Start tracking", systemImage: "antenna.radiowaves.left.and.right")
                     }
-                    .disabled(arming || !lockAwake)
+                    .disabled(arming)
                 } else {
                     Button(role: .destructive) { stop() } label: {
                         Label("Stop tracking", systemImage: "stop.circle.fill")
                     }
                 }
             } footer: {
-                if !lockAwake && !armed {
-                    Text("Ga bij je slot staan tot LinkaPlus “Verbonden” toont en beweeg het slot even. Pas als het slot wakker is, kan de server de tracking aanzetten (anders krijg je geen bevestigingsmail en geen posities).")
-                        .foregroundStyle(Theme.warn)
-                } else {
-                    Text("Zet LINKA’s recovery-modus aan en houdt die aan tot je stopt. Je krijgt een bevestigingsmail van LINKA. Leg de fiets buiten met vrij zicht op de lucht; de eerste GPS-fix kan enkele minuten duren. Verbruikt data van je dataplan.")
-                }
+                Text("Werkt óók als je slot weg is: de aanvraag wordt bij LINKA klaargezet en het slot pikt hem op zodra het zich meldt. Bij diefstal beweegt de fiets, en beweging maakt het slot wakker — meestal binnen enkele minuten. Je krijgt een bevestigingsmail van LINKA zodra het actief is; daarna verschijnen de posities hieronder. Blijft aan tot je stopt. Verbruikt data van je dataplan.")
             }
 
             Section("Status") {
-                row("Tracking", armed ? "aan sinds \(started.map { DateUtils.timeHM($0) } ?? "–")" : "uit")
+                row("Tracking", armed ? "aangevraagd/aan sinds \(started.map { DateUtils.timeHM($0) } ?? "–")" : "uit")
                 row("Posities ontvangen", "\(points.count)")
                 row("Laatste update", lastUpdate.map { DateUtils.timeHM($0) } ?? "–")
                 if let last = points.last {
@@ -117,16 +112,15 @@ struct TrackingTestView: View {
     }
 
     private func arm() {
-        guard lockAwake else { return }
         arming = true; status = nil
-        // Keep the lock awake for the moment the server reaches it.
-        ble.statePing()
+        // If we happen to be next to the lock, wake it so it checks in sooner.
+        if ble.ready { ble.statePing() }
         let auth = session.identity()
         Task {
             do {
                 try await api.setRecoveryMode(serial: serial, enabled: true, auth: auth)
                 armed = true; started = Date(); points = []
-                status = "recovery aangezet"
+                status = ble.ready ? "recovery aangezet" : "aangevraagd — wacht tot het slot zich meldt"
                 startPolling()
             } catch {
                 status = "aanzetten mislukt: \((error as? LocalizedError)?.errorDescription ?? "\(error)")"
