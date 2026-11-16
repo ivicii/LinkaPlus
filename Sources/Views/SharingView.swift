@@ -11,6 +11,7 @@ struct SharingView: View {
     @State private var loading = false
     @State private var inviteEmail = ""
     @State private var message: String?
+    @State private var pendingRevoke: LockPermission?
 
     var body: some View {
         NavigationStack {
@@ -33,10 +34,12 @@ struct SharingView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                if p.owner != true, let uid = p.userId {
-                                    Button(role: .destructive) { revoke(uid) } label: {
+                                if p.owner != true, p.userId != nil {
+                                    Button(role: .destructive) { pendingRevoke = p } label: {
                                         Image(systemName: "person.badge.minus")
                                     }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel("Toegang intrekken voor \(p.displayName)")
                                 }
                             }
                         }
@@ -58,6 +61,18 @@ struct SharingView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Sluit") { dismiss() } } }
             .task { await load() }
+            .confirmationDialog("Toegang intrekken?",
+                                isPresented: Binding(get: { pendingRevoke != nil },
+                                                     set: { if !$0 { pendingRevoke = nil } }),
+                                titleVisibility: .visible) {
+                Button("Intrekken", role: .destructive) {
+                    if let uid = pendingRevoke?.userId { revoke(uid) }
+                    pendingRevoke = nil
+                }
+                Button("Annuleer", role: .cancel) { pendingRevoke = nil }
+            } message: {
+                Text("\(pendingRevoke?.displayName ?? "Deze gebruiker") kan je slot daarna niet meer bedienen.")
+            }
         }
     }
 

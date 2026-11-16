@@ -3,6 +3,8 @@ name: Build unsigned IPA
 on:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -67,7 +69,7 @@ jobs:
             clean build 2>&1 | tee /tmp/build.log
 
       - name: Report build errors on failure
-        if: failure()
+        if: failure() && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -110,7 +112,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # Only on main: a pull-request or branch build must never push to main.
       - name: Commit IPA into dist/
+        if: github.ref == 'refs/heads/main'
         run: |
           set -eo pipefail
           mkdir -p dist

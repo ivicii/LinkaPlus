@@ -32,6 +32,10 @@ struct LockDetailView: View {
     @State private var showSharing = false
     @State private var showRename = false
     @State private var renameText = ""
+    @State private var renameError: String?
+    /// Name after a rename in this session (the `lock` value itself is immutable).
+    @State private var customName: String?
+    private var displayName: String { customName ?? lock.displayName }
     @State private var showSettings = false
     @State private var showFullMap = false
     @State private var showParkedSheet = false
@@ -78,9 +82,7 @@ struct LockDetailView: View {
         guard let c = coordinate, let me = loc.coordinate else { return nil }
         let a = CLLocation(latitude: c.latitude, longitude: c.longitude)
         let b = CLLocation(latitude: me.latitude, longitude: me.longitude)
-        let meters = a.distance(from: b)
-        if meters < 1000 { return String(format: "%.0f m", meters) }
-        return String(format: "%.1f km", meters / 1000)
+        return DistanceText.format(meters: a.distance(from: b))
     }
 
     /// When the lock's GPS location was last updated (location_update_time).
@@ -124,7 +126,7 @@ struct LockDetailView: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
-        .navigationTitle(lock.displayName)
+        .navigationTitle(displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -174,9 +176,12 @@ struct LockDetailView: View {
             }
         }
         .onChange(of: ble.commandResult) { r in
-            // Revert the optimistic flip if the command didn't take.
+            // Command didn't take → show the state the lock itself last reported.
+            // (Never guess: with an unknown state the graphic stays as it was.)
             switch r {
-            case .rejected, .blocked, .timeout: heroLocked = knownLocked ?? !heroLocked
+            case .rejected, .blocked, .timeout:
+                if let known = knownLocked { heroLocked = known }
+                Haptic.warning()
             default: break
             }
             // Don't leave a stale "gelukt" row on screen.
@@ -200,11 +205,11 @@ struct LockDetailView: View {
             FirmwareView(ble: ble).environmentObject(session)
         }
         .sheet(isPresented: $showBLE) {
-            BLEDiagnosticsView(lockName: lock.displayName)
+            BLEDiagnosticsView(lockName: displayName)
         }
         .sheet(isPresented: $showBLEControl) {
             if let serial = lock.serial_no {
-                BLEControlView(serial: serial, lockName: lock.displayName)
+                BLEControlView(serial: serial, lockName: displayName)
                     .environmentObject(session)
             }
         }
@@ -218,7 +223,7 @@ struct LockDetailView: View {
             FindLockView(ble: ble, onSiren: { if ble.ready { ble.sirenOn() } else { playSiren() } })
         }
         .sheet(isPresented: $showStats) {
-            StatsView(activities: allActivities, lockName: lock.displayName)
+            StatsView(activities: allActivities, lockName: displayName)
         }
         .sheet(isPresented: $showSharing) {
             if let serial = lock.serial_no {
@@ -419,7 +424,7 @@ struct LockDetailView: View {
     private var beheerSection: some View {
         Section("Delen & beheer") {
             Button { showSharing = true } label: { Label("Delen & toegang", systemImage: "person.2.fill") }
-            Button { renameText = lock.displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
+            Button { renameText = displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
         }
     }
 
@@ -651,7 +656,7 @@ struct LockDetailView: View {
         NavigationStack {
             Group {
                 if let coordinate {
-                    LockMapView(coordinate: coordinate, title: lock.displayName, route: routePoints)
+                    LockMapView(coordinate: coordinate, title: displayName, route: routePoints)
                         .ignoresSafeArea(edges: .bottom)
                 } else {
                     VStack(spacing: 8) {
@@ -660,7 +665,7 @@ struct LockDetailView: View {
                     }
                 }
             }
-            .navigationTitle(lock.displayName)
+            .navigationTitle(displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Sluit") { showFullMap = false } }
@@ -717,10 +722,10 @@ struct LockDetailView: View {
 
             Section("Delen & beheer") {
                 Button { showSharing = true } label: { Label("Delen & toegang", systemImage: "person.2.fill") }
-                Button { renameText = lock.displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
+                Button { renameText = displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
                 if let serial = lock.serial_no {
                     NavigationLink {
-                        OwnershipView(serial: serial, lockName: lock.displayName)
+                        OwnershipView(serial: serial, lockName: displayName)
                     } label: { Label("Eigendom wijzigen", systemImage: "person.crop.circle.badge.exclamationmark") }
                 }
             }
@@ -735,7 +740,7 @@ struct LockDetailView: View {
                 EmptyView()
             } footer: {
                 VStack(spacing: 3) {
-                    Text("LinkaPlus v1.0")
+                    Text("LinkaPlus v\(appVersion)")
                     Text("Created by Ivo Rooijackers (IvoRoo)")
                 }
                 .font(.caption)
@@ -753,6 +758,16 @@ struct LockDetailView: View {
         } message: {
             Text("Nieuwe naam voor dit slot (in de cloud).")
         }
+        .alert("Hernoemen mislukt", isPresented: Binding(get: { renameError != nil },
+                                                          set: { if !$0 { renameError = nil } })) {
+            Button("OK", role: .cancel) { renameError = nil }
+        } message: {
+            Text(renameError ?? "")
+        }
+    }
+
+    private var appVersion: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0"
     }
 
     private var advancedPage: some View {
@@ -777,6 +792,7 @@ struct LockDetailView: View {
 
     private var bleStatusText: String {
         if bleKeyError != nil { return "Sleutel niet geladen" }
+        if ble.bluetoothOff { return "Bluetooth staat uit" }
         switch ble.state {
         case "scannen": return "Zoeken naar slot…"
         case "verbinden", "services": return "Verbinden…"
@@ -801,6 +817,7 @@ struct LockDetailView: View {
     }
 
     private var heroSubtitle: String {
+        if ble.bluetoothOff { return "Zet Bluetooth aan om je slot te bedienen" }
         if !ble.ready { return "Ga dichtbij je slot om het te bedienen" }
         if ble.motion == .locking { return "Vergrendelen…" }
         if ble.motion == .unlocking { return "Ontgrendelen…" }
@@ -854,7 +871,7 @@ struct LockDetailView: View {
     }
 
     private var connectionPill: some View {
-        let reconnectable = ble.state == "verbroken" || ble.state == "gestopt"
+        let reconnectable = !ble.bluetoothOff && (ble.state == "verbroken" || ble.state == "gestopt")
         return Button {
             if reconnectable { ble.start() }
         } label: {
@@ -862,7 +879,7 @@ struct LockDetailView: View {
                 Circle().fill(ble.ready ? Theme.success : Color.secondary).frame(width: 8, height: 8)
                 Text(bleStatusText).font(.footnote.weight(.semibold))
                 if reconnectable { Image(systemName: "arrow.clockwise").font(.caption.weight(.bold)) }
-                else if !ble.ready && bleKeyError == nil { ProgressView().controlSize(.mini) }
+                else if !ble.ready && bleKeyError == nil && !ble.bluetoothOff { ProgressView().controlSize(.mini) }
             }
             .foregroundStyle(ble.ready ? Color.primary : Color.secondary)
             .padding(.horizontal, 12).padding(.vertical, 7)
@@ -1001,15 +1018,15 @@ struct LockDetailView: View {
     /// Triggered by the Action button / widget / Shortcut deep link: unlock as
     /// soon as we have a live context counter from the lock.
     private func maybeAutoUnlock() {
-        guard router.unlockRequested, ble.ready, ble.ctxCounter != nil else { return }
+        // A request older than AppRouter.requestLifetime is dropped, not executed.
+        guard router.hasFreshRequest(), ble.ready, ble.ctxCounter != nil else { return }
         var lockIt = router.wantsLock
         if router.wantsToggle {
             // Wait until the lock has reported its real state (status frame).
             guard let state = ble.liveLocked else { return }
             lockIt = !state
         }
-        router.unlockRequested = false
-        router.wantsToggle = false
+        router.cancelRequest()
         ble.channel = 0; ble.counterOffset = 0
         if lockIt { ble.lock() } else { ble.unlock() }
         Haptic.success()
@@ -1038,14 +1055,14 @@ struct LockDetailView: View {
             return
         }
         bleStarted = true
-        ble.configure(keys: k, serial: serial, nameHint: lock.displayName)
+        ble.configure(keys: k, serial: serial, nameHint: displayName)
         ble.start()
     }
 
     @ViewBuilder
     private var mapView: some View {
         if let coordinate {
-            LockMapView(coordinate: coordinate, title: lock.displayName, route: routePoints)
+            LockMapView(coordinate: coordinate, title: displayName, route: routePoints)
         } else {
             ZStack {
                 Color(.secondarySystemBackground)
@@ -1063,7 +1080,7 @@ struct LockDetailView: View {
         let dist: String? = loc.coordinate.map { me in
             let m = CLLocation(latitude: spot.lat, longitude: spot.lon)
                 .distance(from: CLLocation(latitude: me.latitude, longitude: me.longitude))
-            return m < 1000 ? String(format: "%.0f m", m) : String(format: "%.1f km", m / 1000)
+            return DistanceText.format(meters: m)
         }
         Button { showParkedSheet = true } label: {
             HStack(spacing: 12) {
@@ -1120,7 +1137,7 @@ struct LockDetailView: View {
     private func openInMaps(_ c: CLLocationCoordinate2D) {
         let place = MKPlacemark(coordinate: c)
         let item = MKMapItem(placemark: place)
-        item.name = lock.displayName
+        item.name = displayName
         item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
     }
 
@@ -1177,10 +1194,18 @@ struct LockDetailView: View {
     }
 
     private func renameLock() {
-        guard let serial = lock.serial_no, !renameText.isEmpty else { return }
+        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let serial = lock.serial_no, !name.isEmpty, name != displayName else { return }
         Task {
-            try? await api.renameLock(name: renameText, serial: serial,
-                                      isLocked: liveLocked, lockType: "original", auth: session.identity())
+            do {
+                try await api.renameLock(name: name, serial: serial,
+                                         isLocked: liveLocked, lockType: "original", auth: session.identity())
+                customName = name          // title, map pin and sheets update at once
+                router.locksChanged += 1   // the list reloads in the background
+                Haptic.success()
+            } catch {
+                renameError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            }
         }
     }
 

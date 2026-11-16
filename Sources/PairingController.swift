@@ -68,7 +68,7 @@ final class PairingController: NSObject, ObservableObject {
 
     /// Embedded MAC from the manufacturer record (type 0xC2/0xC3, MAC at +15 of the
     /// record data, big-endian) — iOS hides the real Bluetooth address.
-    private static func macFromAdvert(_ data: Data?) -> String? {
+    static func macFromAdvert(_ data: Data?) -> String? {
         guard let d = data.map({ [UInt8]($0) }), d.count >= 8 else { return nil }
         for start in 0..<min(3, d.count) where d[start] == 0xC2 || d[start] == 0xC3 {
             let m = start + 15

@@ -10,7 +10,7 @@ struct UnlockLockIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        UserDefaults.standard.set(true, forKey: AppRouter.pendingKey)
+        AppRouter.setPending(AppRouter.pendingKey)
         return .result()
     }
 }
@@ -24,7 +24,7 @@ struct LockLockIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        UserDefaults.standard.set(true, forKey: AppRouter.pendingLockKey)
+        AppRouter.setPending(AppRouter.pendingLockKey)
         return .result()
     }
 }
@@ -38,7 +38,7 @@ struct ToggleLockIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        UserDefaults.standard.set(true, forKey: AppRouter.pendingToggleKey)
+        AppRouter.setPending(AppRouter.pendingToggleKey)
         return .result()
     }
 }

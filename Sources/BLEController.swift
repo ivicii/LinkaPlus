@@ -9,6 +9,10 @@ final class BLEController: NSObject, ObservableObject {
 
     @Published private(set) var state = "idle"
     @Published private(set) var ready = false
+    /// Serial of the lock this controller is configured for (nil = none yet).
+    @Published private(set) var currentSerial: String?
+    /// Bluetooth is switched off or the app has no Bluetooth permission.
+    @Published private(set) var bluetoothOff = false
     @Published private(set) var ctxEncVer: Int?
     @Published private(set) var ctxCounter: UInt32?
     @Published private(set) var liveLocked: Bool?
@@ -303,6 +307,11 @@ final class BLEController: NSObject, ObservableObject {
     private var write0016: CBCharacteristic?
 
     func configure(keys: AccessKeys, serial: String, nameHint: String?) {
+        // A different lock than the one we were driving: drop the old link and its
+        // live state, so nothing from lock A is shown for (or sent to) lock B.
+        let previous = currentSerial ?? UserDefaults.standard.string(forKey: Self.lastSerialKey)
+        if let previous, previous.caseInsensitiveCompare(serial) != .orderedSame { resetForLockSwitch() }
+        currentSerial = serial
         UserDefaults.standard.set(serial, forKey: Self.lastSerialKey)
         UserDefaults.standard.set(nameHint, forKey: Self.lastNameKey)
         allKeys = keys
@@ -312,6 +321,27 @@ final class BLEController: NSObject, ObservableObject {
             subkey = LinkaCrypto.hex(ck.hex)
             priv = ck.admin ? .admin : .user
         }
+    }
+
+    private func resetForLockSwitch() {
+        add("Ander slot gekozen — verbinding en live status gereset.")
+        central.stopScan()
+        let old = peripheral
+        peripheral = nil; write0002 = nil; write0016 = nil
+        if let old { central.cancelPeripheralConnection(old) }
+        UserDefaults.standard.removeObject(forKey: Self.lastPeripheralKey)
+        ready = false; state = "idle"; rssi = nil
+        ctxCounter = nil; ctxEncVer = nil; lastUsedCounter = nil; didInitialStatusPing = false
+        liveLocked = nil; motion = nil; motionStart = nil; lockStateText = nil; lockReason = nil
+        batteryLevelBLE = nil; batteryVoltageBLE = nil; isChargingBLE = false
+        statusFlags = []; prevFlagSet = []
+        commandResult = nil; lastEvent = "–"; winner = nil
+        settingValues = [:]; settingValues2 = [:]
+        netOperator = nil; netCSQ = nil; fwRevision = nil
+        infoUptime = nil; infoRSSIpkt = nil; accelG = nil; infoExtra = nil
+        infoTempC = nil; infoRaw = nil; infoAt = nil
+        awayLatched = false; nearCount = 0
+        subkey = []; mac = []; allKeys = nil
     }
 
     struct KeyVariant { let name: String; let hex: String; let priv: LinkaCrypto.Priv }
@@ -697,6 +727,7 @@ final class BLEController: NSObject, ObservableObject {
 extension BLEController: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         Task { @MainActor in
+            bluetoothOff = (central.state == .poweredOff || central.state == .unauthorized)
             if central.state == .poweredOn {
                 // Bluetooth came back on (or relaunch) — resume unless stopped on purpose.
                 if let p = peripheral, p.state == .connected, !ready {
@@ -707,14 +738,26 @@ extension BLEController: CBCentralManagerDelegate {
                 }
             } else {
                 add("BT status \(central.state.rawValue)")
+                // Bluetooth went away: iOS drops the link without a disconnect callback.
+                if bluetoothOff {
+                    ready = false; rssi = nil
+                    ctxCounter = nil; ctxEncVer = nil; lastUsedCounter = nil
+                    didInitialStatusPing = false; motion = nil
+                    if state != "gestopt" { state = "verbroken" }
+                }
             }
         }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                                     advertisementData: [String: Any], rssi RSSI: NSNumber) {
         let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name
+        let mfg = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
         Task { @MainActor in
             guard let name = name else { return }
+            // All locks advertise the same name. When the advert carries the lock's
+            // MAC, only connect to the lock we are configured for.
+            if let advMac = PairingController.macFromAdvert(mfg), let serial = currentSerial,
+               advMac.caseInsensitiveCompare(serial) != .orderedSame { return }
             let hint = nameHint?.lowercased()
             let isLock = name.lowercased().contains("linka") || name.lowercased().contains("leo")
             let match = hint.map { name.lowercased().contains($0) } ?? false
@@ -751,6 +794,8 @@ extension BLEController: CBCentralManagerDelegate {
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
+            // A lock we already let go of (switched to another lock) — ignore.
+            guard let current = self.peripheral, current.identifier == peripheral.identifier else { return }
             ready = false; state = "verbroken"; add("Verbinding verbroken.")
             didInitialStatusPing = false
             lastUsedCounter = nil

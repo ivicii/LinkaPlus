@@ -79,6 +79,9 @@ final class SessionStore: ObservableObject {
         Keychain.delete("userId")
         Keychain.delete("displayName")
         Keychain.delete("email")
+        // The cached lock list belongs to this account — a next user must not see
+        // it as "offline data". (Access keys stay: they are the Bluetooth back-up.)
+        Keychain.delete("locks_cache")
         isAuthenticated = false
     }
 }
