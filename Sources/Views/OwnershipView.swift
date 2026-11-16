@@ -98,7 +98,7 @@ struct OwnershipView: View {
                 try await api.transferOwnership(email: cleanEmail, serial: serial, auth: session.identity())
                 finishRemoval()
             } catch {
-                message = "Overdragen mislukt: \((error as? LocalizedError)?.errorDescription ?? "\(error)")"
+                message = "Overdragen mislukt: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
             }
             busy = false
         }
@@ -115,7 +115,7 @@ struct OwnershipView: View {
                 }
                 finishRemoval()
             } catch {
-                message = "Verwijderen mislukt: \((error as? LocalizedError)?.errorDescription ?? "\(error)")"
+                message = "Verwijderen mislukt: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
             }
             busy = false
         }
@@ -133,7 +133,7 @@ struct OwnershipView: View {
             do {
                 try await api.resetAllLockInformation(serial: serial, auth: session.identity())
             } catch {
-                message = "Slot is gereset, maar de server gaf een fout: \((error as? LocalizedError)?.errorDescription ?? "\(error)"). Je sleutel werkt nog; probeer het opnieuw."
+                message = "Slot is gereset, maar de server gaf een fout: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription). Je sleutel werkt nog; probeer het opnieuw."
                 busy = false; step = nil; return
             }
             step = "Slot herstarten…"

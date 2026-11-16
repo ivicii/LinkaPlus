@@ -41,6 +41,8 @@ struct Lock: Codable, Identifiable, Hashable {
     let createdAt: String?
     let modifiedAt: String?
     let userProfile_id: String?
+    /// Server-side lock type ("leo2", …). Sent back unchanged when renaming.
+    var lock_type: String? = nil
 
     var id: String { _id }
 
@@ -82,7 +84,8 @@ struct AssociatedLock: Decodable {
             longitude: lon,
             createdAt: nil,
             modifiedAt: location_update_time,
-            userProfile_id: nil
+            userProfile_id: nil,
+            lock_type: lock_type
         )
     }
 }
@@ -100,7 +103,8 @@ extension Lock {
             longitude: hasLocation ? longitude : other.longitude,
             createdAt: other.createdAt,
             modifiedAt: modifiedAt ?? other.modifiedAt,
-            userProfile_id: other.userProfile_id ?? userProfile_id
+            userProfile_id: other.userProfile_id ?? userProfile_id,
+            lock_type: lock_type ?? other.lock_type
         )
     }
 }

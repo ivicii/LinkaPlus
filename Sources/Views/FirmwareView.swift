@@ -74,7 +74,7 @@ struct FirmwareView: View {
             }
             .navigationTitle("Firmware")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Sluit") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Gereed") { dismiss() } } }
             .task { await load() }
         }
     }
@@ -127,7 +127,7 @@ struct FirmwareView: View {
         do {
             info = try await api.consumerAppVersion(auth: session.identity())
         } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         loading = false
     }
@@ -140,7 +140,7 @@ struct FirmwareView: View {
         do {
             downloadedURL = try await api.downloadFile(from: url, suggestedName: fileName)
         } catch {
-            downloadError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            downloadError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         downloading = false
     }

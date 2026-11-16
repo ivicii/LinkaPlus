@@ -23,11 +23,16 @@ struct LockListView: View {
                 } else if let error, locks.isEmpty {
                     errorState(error)
                 } else if locks.isEmpty {
-                    ContentUnavailableViewCompat(
-                        title: "Geen sloten",
-                        systemImage: "lock.slash",
-                        description: "Er zijn geen sloten gekoppeld aan dit account."
-                    )
+                    VStack(spacing: 12) {
+                        ContentUnavailableViewCompat(
+                            title: "Geen sloten",
+                            systemImage: "lock.slash",
+                            description: "Er zijn geen sloten gekoppeld aan dit account."
+                        )
+                        Button("Slot toevoegen") { showAddLock = true }
+                            .buttonStyle(.borderedProminent)
+                        Button("Vernieuwen") { Task { await load() } }
+                    }
                 } else {
                     List {
                         if sessionExpired {
@@ -83,7 +88,9 @@ struct LockListView: View {
             }
             .task { await load() }
             .onChange(of: router.unlockRequested) { req in
-                if req, let first = locks.first, path.last != first { path = [first] }
+                // Only from the list itself: don't yank the user away from a lock
+                // (or its settings) they are looking at — that screen handles it.
+                if req, path.isEmpty, let first = locks.first { path = [first] }
             }
             .onChange(of: router.lockRemoved) { _ in
                 path = []
@@ -106,7 +113,7 @@ struct LockListView: View {
                 Text("Je slot blijft gekoppeld aan je account. Log opnieuw in om het weer te bedienen.")
             }
             .onChange(of: locks) { newLocks in
-                if router.unlockRequested, let first = newLocks.first, path.isEmpty { path = [first] }
+                if router.hasFreshRequest(), let first = newLocks.first, path.isEmpty { path = [first] }
             }
             .sheet(isPresented: $showAddLock) {
                 AddLockView(onDone: { Task { await load() } }).environmentObject(session)
@@ -148,7 +155,7 @@ struct LockListView: View {
                 locks = cached
                 offline = true
             } else {
-                self.error = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
         busy = false
@@ -188,7 +195,7 @@ struct LockRow: View {
     var body: some View {
         HStack(spacing: 14) {
             ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
                     .fill(Theme.grad(tint))
                     .frame(width: 48, height: 48)
                     .shadow(color: tint.opacity(0.35), radius: 6, y: 3)

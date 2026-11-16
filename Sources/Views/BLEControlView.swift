@@ -103,7 +103,7 @@ struct BLEControlView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Sluit") { dismiss() }
+                    Button("Gereed") { dismiss() }
                 }
             }
         }
@@ -119,7 +119,7 @@ struct BLEControlView: View {
             // Cloud unreachable → fall back to the key cached on this phone.
             keys = LockCache.loadKeys(serial: serial)
             if keys == nil {
-                loadError = (error as? LocalizedError)?.errorDescription ?? "Sleutel laden mislukt: \(error)"
+                loadError = (error as? LocalizedError)?.errorDescription ?? "Sleutel laden mislukt: \(error.localizedDescription)"
                 return
             }
         }

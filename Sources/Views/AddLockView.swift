@@ -28,7 +28,7 @@ struct AddLockView: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(f.name).font(.headline)
-                                        Text(f.mac ?? "MAC onbekend").font(.caption.monospaced()).foregroundStyle(.secondary)
+                                        Text(f.mac ?? "Serienummer onbekend").font(.caption.monospaced()).foregroundStyle(.secondary)
                                         if mine { Text("Staat al in je lijst").font(.caption2).foregroundStyle(Theme.success) }
                                     }
                                     Spacer()
@@ -77,7 +77,7 @@ struct AddLockView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Sluit") { pc.stopScan(); if pc.finished { onDone() }; dismiss() }
+                    Button("Gereed") { pc.stopScan(); if pc.finished { onDone() }; dismiss() }
                         .disabled(pc.busy)
                 }
                 ToolbarItem(placement: .confirmationAction) {

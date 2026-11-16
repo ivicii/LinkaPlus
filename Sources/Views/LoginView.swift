@@ -116,7 +116,7 @@ struct LoginView: View {
                     focus = .code
                 }
             } catch {
-                self.error = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
             busy = false
         }

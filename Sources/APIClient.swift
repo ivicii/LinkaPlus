@@ -10,7 +10,7 @@ enum APIError: LocalizedError {
         switch self {
         case .http(let code, let msg): return msg ?? "Serverfout (HTTP \(code))."
         case .server(let msg): return msg
-        case .decoding(let d): return "Kon antwoord niet lezen: \(d)"
+        case .decoding: return "Onverwacht antwoord van de server."
         case .noData: return "Geen gegevens ontvangen."
         }
     }
@@ -21,9 +21,9 @@ enum APIError: LocalizedError {
 struct APIClient {
     static let baseURL = URL(string: "https://app3.linkalock.com")!
 
-    private let session: URLSession
-
-    init() {
+    /// One session for the whole app: views create an `APIClient()` on every body
+    /// pass, and a URLSession per instance is never released (and reuses nothing).
+    private static let shared: URLSession = {
         let config = URLSessionConfiguration.default
         // Fail fast when there is no network: with waitsForConnectivity a request
         // waits (up to days) for a connection, so the offline fall-backs — cached
@@ -31,8 +31,11 @@ struct APIClient {
         config.timeoutIntervalForRequest = 20
         config.timeoutIntervalForResource = 60
         config.waitsForConnectivity = false
-        self.session = URLSession(configuration: config)
-    }
+        return URLSession(configuration: config)
+    }()
+    private var session: URLSession { Self.shared }
+
+    init() {}
 
     // MARK: Auth-free endpoints
 
@@ -102,12 +105,18 @@ struct APIClient {
         var locks = assoc.map { $0.asLock() }
 
         // Best-effort: enrich locked-state (and fall back coords) per serial.
-        for i in locks.indices {
-            guard let serial = locks[i].serial_no else { continue }
-            if let single = try? await lockSingle(serial: serial, auth: auth) {
-                locks[i] = locks[i].merging(single)
+        // In parallel: one slow lookup must not hold up the whole list.
+        let serials = locks.map { $0.serial_no }
+        let singles = await withTaskGroup(of: (Int, Lock?).self) { group -> [Int: Lock] in
+            for (i, serial) in serials.enumerated() {
+                guard let serial else { continue }
+                group.addTask { (i, try? await self.lockSingle(serial: serial, auth: auth)) }
             }
+            var out: [Int: Lock] = [:]
+            for await (i, single) in group { if let single { out[i] = single } }
+            return out
         }
+        for (i, single) in singles { locks[i] = locks[i].merging(single) }
         return locks
     }
 
@@ -428,7 +437,9 @@ struct APIClient {
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         var comps = URLComponents()
         comps.queryItems = fields.map { URLQueryItem(name: $0.key, value: $0.value) }
-        let encoded = comps.percentEncodedQuery ?? ""
+        // URLComponents leaves "+" as is, but in a form body "+" means a space —
+        // "naam+tag@x.nl" would arrive as "naam tag@x.nl".
+        let encoded = (comps.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B")
         req.httpBody = Data(encoded.utf8)
     }
 

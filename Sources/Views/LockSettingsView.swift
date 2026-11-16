@@ -163,6 +163,7 @@ struct SlotSettingsPage: View {
                 else {
                     Button { load() } label: { Image(systemName: "arrow.clockwise") }
                         .disabled(!connected)
+                        .accessibilityLabel("Opnieuw uitlezen")
                 }
             }
         }
@@ -218,16 +219,18 @@ struct SlotSettingsPage: View {
                 Button { ble.setPowerMode(seconds: m.2) } label: {
                     VStack(spacing: 2) {
                         Text(m.0).font(.subheadline.weight(.semibold))
+                            .lineLimit(1).minimumScaleFactor(0.7)
                         Text(m.1).font(.caption2).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity).padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .background(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
                         .fill(on ? Theme.accent.opacity(0.22) : Color(.tertiarySystemFill)))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .overlay(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
                         .stroke(on ? Theme.accent : .clear, lineWidth: 1.5))
                 }
                 .buttonStyle(.plain)
                 .disabled(!connected)
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
     }
@@ -263,13 +266,13 @@ struct SlotSettingsPage: View {
                     .disabled(!connected || pacInput.count < 4)
                 }
             } header: { Text("PAC-code") } footer: {
-                Text("De tapcode om het slot zonder telefoon te openen. De app leest hem rechtstreeks uit het slot (GET_SETTING).")
+                Text("De tapcode om het slot zonder telefoon te openen.")
             }
             Section {
                 SettingToggleRow(title: "Bewegingsmelding", icon: "bell.badge", idx: 106,
                                  ble: ble, enabled: connected) { ble.setMovementAlarm($0) }
             } footer: {
-                Text("Het slot meldt beweging terwijl het dicht is (officiële instelling, index 106).")
+                Text("Het slot meldt beweging terwijl het vergrendeld is.")
             }
             Section {
                 stepper("Alarm-vertraging", unit: "s", icon: "timer", idx: 7, range: 0...60) { ble.setAlarmDelay($0) }

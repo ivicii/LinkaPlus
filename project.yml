@@ -59,7 +59,7 @@ targets:
             linkalock.com:
               NSIncludesSubdomains: true
               NSExceptionAllowsInsecureHTTPLoads: false
-              NSExceptionMinimumTLSVersion: "TLSv1.0"
+              NSExceptionMinimumTLSVersion: "TLSv1.2"
               NSExceptionRequiresForwardSecrecy: false
   LinkaPlusWidget:
     type: app-extension

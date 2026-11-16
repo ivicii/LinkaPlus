@@ -89,7 +89,7 @@ struct RenewDataPlanView: View {
                 message = "Kon betaalsessie niet opzetten."
             }
         } catch {
-            message = (error as? LocalizedError)?.errorDescription ?? "Laden mislukt: \(error)"
+            message = (error as? LocalizedError)?.errorDescription ?? "Laden mislukt: \(error.localizedDescription)"
         }
         loading = false
     }
@@ -109,7 +109,7 @@ struct RenewDataPlanView: View {
                         done = true
                         onActivated?()
                     } catch {
-                        message = "Kaart opgeslagen, maar activeren mislukte: \((error as? LocalizedError)?.errorDescription ?? "\(error)")"
+                        message = "Kaart opgeslagen, maar activeren mislukte: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
                     }
                     working = false
                 }

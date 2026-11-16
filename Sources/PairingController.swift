@@ -138,6 +138,11 @@ final class PairingController: NSObject, ObservableObject {
                 fail("Server gaf geen geldige sleutels terug. Er is niets naar het slot geschreven."); return
             }
             gen = g
+            // Never overwrite keys from an interrupted earlier attempt: they may be
+            // the only copy of what is in the lock now.
+            if let old = Keychain.get(Self.pendingKey(serial)) {
+                Keychain.set(old, for: Self.pendingKey(serial) + "_prev_\(Int(Date().timeIntervalSince1970))")
+            }
             // Safety: keep the new master keys on the phone BEFORE touching the lock.
             if let data = try? JSONEncoder().encode(g), let s = String(data: data, encoding: .utf8) {
                 Keychain.set(s, for: Self.pendingKey(serial))
@@ -160,7 +165,7 @@ final class PairingController: NSObject, ObservableObject {
 
             // Order like the official app with encVer field f=0 (l()==1): first = master_2 → slot 1.
             let first = LinkaCrypto.hex(m2), second = LinkaCrypto.hex(m1)
-            log("Sleutel 1 schrijven (punt zonder terugkeer)…")
+            log("Sleutel 1 schrijven — blijf bij het slot…")
             guard await writeMasterKey(first, lowIdx: 21, highIdx: 22, with: originMaster, slotF: 0) else {
                 fail("Schrijven van sleutel 1 niet bevestigd. Probeer opnieuw; de sleutels staan bewaard op je telefoon.")
                 canResume = true; return
@@ -168,7 +173,7 @@ final class PairingController: NSObject, ObservableObject {
             log("✓ Sleutel 1 in het slot.")
             try await finishFromFirst(serial: serial, first: first, second: second, m1: m1, m2: m2)
         } catch {
-            fail("Fout: \((error as? LocalizedError)?.errorDescription ?? "\(error)")")
+            fail("Fout: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)")
             if gen != nil, steps.contains(where: { $0.hasPrefix("✓ Sleutel 1") }) { canResume = true }
         }
     }
@@ -204,11 +209,12 @@ final class PairingController: NSObject, ObservableObject {
         }
         busy = true; error = nil; canResume = false
         Task {
-            guard await connectAndWaitContext() else { return }
+            // Keep "Hervatten" available if the reconnect fails: key 1 is already in the lock.
+            guard await connectAndWaitContext() else { canResume = true; return }
             do {
                 try await finishFromFirst(serial: serial, first: LinkaCrypto.hex(m2), second: LinkaCrypto.hex(m1), m1: m1, m2: m2)
             } catch {
-                fail("Fout: \((error as? LocalizedError)?.errorDescription ?? "\(error)")"); canResume = true
+                fail("Fout: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"); canResume = true
             }
         }
     }
@@ -221,7 +227,7 @@ final class PairingController: NSObject, ObservableObject {
                 log("✓ Toegangsverzoek verstuurd naar de eigenaar.")
                 needsPermissionRequest = false; error = nil
             } catch {
-                self.error = "Verzoek mislukt: \((error as? LocalizedError)?.errorDescription ?? "\(error)")"
+                self.error = "Verzoek mislukt: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
             }
         }
     }
@@ -240,7 +246,7 @@ final class PairingController: NSObject, ObservableObject {
             fail("Verbinden mislukt. Er is niets naar het slot geschreven."); return false
         }
         guard await wait(8, until: { counter != nil }) else {
-            fail("Geen context van het slot ontvangen."); return false
+            fail("Het slot reageert niet. Druk op de knop van het slot en probeer opnieuw."); return false
         }
         guard let v = encVer, v == 2 || v == 3 else {
             fail("Onverwachte encryptieversie (\(encVer.map(String.init) ?? "–")); alleen LEO2 wordt ondersteund."); return false
@@ -251,7 +257,7 @@ final class PairingController: NSObject, ObservableObject {
 
     private func sendFrame(_ payload: [UInt8], master: [UInt8], slotF: Int) -> Bool {
         guard let p = peripheral, let ch = writeChar, let c = counter, let v = encVer else {
-            fail("Geen verbinding/teller."); return false
+            fail("Verbinding met het slot verbroken. Probeer opnieuw."); return false
         }
         let frame = LinkaCrypto.masterFrame(mac: mac, payload: payload, masterKey: master, slotF: slotF,
                                             priv: .admin, encVer: v, counter: c)

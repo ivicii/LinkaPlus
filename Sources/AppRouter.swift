@@ -25,9 +25,21 @@ final class AppRouter: ObservableObject {
     /// Epoch seconds at which an App Intent set one of the flags above.
     static let pendingAtKey = "pendingAt"
 
-    func requestUnlock() { wantsToggle = false; wantsLock = false; requestedAt = Date(); unlockRequested = true }
-    func requestLock()   { wantsToggle = false; wantsLock = true;  requestedAt = Date(); unlockRequested = true }
-    func requestToggle() { wantsToggle = true; wantsLock = false;  requestedAt = Date(); unlockRequested = true }
+    func requestUnlock() { begin(lock: false, toggle: false) }
+    func requestLock()   { begin(lock: true, toggle: false) }
+    func requestToggle() { begin(lock: false, toggle: true) }
+
+    private func begin(lock: Bool, toggle: Bool) {
+        wantsLock = lock; wantsToggle = toggle
+        let stamp = Date()
+        requestedAt = stamp
+        unlockRequested = true
+        // Clear the flag when it expires, instead of whenever someone next looks.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.requestLifetime) { [weak self] in
+            guard let self, self.requestedAt == stamp else { return }
+            self.cancelRequest()
+        }
+    }
 
     /// True while a request is pending and still recent. A stale request is dropped.
     func hasFreshRequest() -> Bool {

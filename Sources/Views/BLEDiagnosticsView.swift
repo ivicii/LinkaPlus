@@ -81,7 +81,7 @@ struct BLEDiagnosticsView: View {
             .onDisappear { ble.stop() }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Sluit") { ble.stop(); dismiss() }
+                    Button("Gereed") { ble.stop(); dismiss() }
                 }
             }
         }

@@ -27,8 +27,8 @@ struct SharingView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(p.displayName).font(.body)
                                     HStack(spacing: 6) {
-                                        if p.owner == true { Text("Eigenaar").foregroundStyle(.blue) }
-                                        if p.isPendingApproval == true { Text("In afwachting").foregroundStyle(.orange) }
+                                        if p.owner == true { Text("Eigenaar").foregroundStyle(Theme.accent) }
+                                        if p.isPendingApproval == true { Text("In afwachting").foregroundStyle(Theme.warn) }
                                         if let e = p.email, e != p.displayName { Text(e) }
                                     }
                                     .font(.caption).foregroundStyle(.secondary)
@@ -59,7 +59,7 @@ struct SharingView: View {
             }
             .navigationTitle("Delen")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Sluit") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Gereed") { dismiss() } } }
             .task { await load() }
             .confirmationDialog("Toegang intrekken?",
                                 isPresented: Binding(get: { pendingRevoke != nil },
@@ -78,7 +78,12 @@ struct SharingView: View {
 
     private func load() async {
         loading = true
-        people = (try? await api.lockPermissions(serial: serial, auth: session.identity())) ?? people
+        do {
+            people = try await api.lockPermissions(serial: serial, auth: session.identity())
+        } catch {
+            // Don't show "Niemand gevonden" when the list simply could not be loaded.
+            message = "Laden mislukt: " + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+        }
         loading = false
     }
 

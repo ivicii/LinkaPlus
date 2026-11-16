@@ -324,6 +324,15 @@ final class BLEController: NSObject, ObservableObject {
         }
     }
 
+    /// Let go of the lock we are driving unless it is `serial`. Called when a
+    /// lock's screen opens, so that screen can never operate another lock — also
+    /// not when no key could be loaded for it.
+    func release(unless serial: String) {
+        guard let current = currentSerial, current.caseInsensitiveCompare(serial) != .orderedSame else { return }
+        resetForLockSwitch()
+        currentSerial = nil
+    }
+
     private func resetForLockSwitch() {
         add("Ander slot gekozen — verbinding en live status gereset.")
         central.stopScan()
@@ -557,9 +566,9 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     /// Quick Lock as the official app does it (LockController.doSetAutolock): idx 102 = 20 / 0.
-    func setQuickLock(_ on: Bool)   { put(102, on ? 20 : 0, on ? "Quick-lock aan" : "Quick-lock uit") }
+    func setQuickLock(_ on: Bool)   { put(102, on ? 20 : 0, on ? "Autolock aan" : "Autolock uit") }
     /// VLSO_SETTING_ALLOW_UNCONN_LOCK (idx 55): allow locking without a connected phone.
-    func setAllowUnconnLock(_ on: Bool) { put(55, on ? 1 : 0, on ? "Sluiten zonder verbinding aan" : "Sluiten zonder verbinding uit") }
+    func setAllowUnconnLock(_ on: Bool) { put(55, on ? 1 : 0, on ? "Quick-lock aan" : "Quick-lock uit") }
     /// Movement notification (official doSetMovementNotification): idx 106 = 5 / 0.
     func setMovementAlarm(_ on: Bool) { put(106, on ? 5 : 0, on ? "Bewegingsmelding aan" : "Bewegingsmelding uit") }
     func setAudio(_ on: Bool)       { put(12, on ? 3 : 0, on ? "Geluid aan" : "Geluid uit") }
@@ -688,7 +697,11 @@ final class BLEController: NSObject, ObservableObject {
     private func sendPayload(_ payload: [UInt8], name: String, expectActuation: Bool = false, quiet: Bool = false, retry: Int = 0, onSuccess: (() -> Void)? = nil) {
         let ch = (channel == 1) ? write0016 : write0002
         guard let ch = ch else { add("Geen write-characteristic."); return }
-        guard let c = ctxCounter else { add("Nog geen context-teller (wacht op 0x12-frame)."); return }
+        guard let c = ctxCounter else {
+            add("Nog geen context-teller (wacht op 0x12-frame).")
+            if !quiet { commandResult = .timeout }   // tell the user instead of doing nothing
+            return
+        }
         let useCounter = UInt32(truncatingIfNeeded: Int(c) + counterOffset)
         // Anti-replay: the counter is the AES IV. Reusing it makes the firmware
         // reject the command as "Bad enc" and increments its bad-enc counter, so
@@ -805,7 +818,12 @@ extension BLEController: CBCentralManagerDelegate {
             ready = false; state = "verbroken"; add("Verbinding verbroken.")
             didInitialStatusPing = false
             lastUsedCounter = nil
-            if proximityUnlockEnabled, liveLocked == true { awayLatched = true; nearCount = 0 }
+            // "Walked away" only when the signal was already weak. A drop at close
+            // range (lock rebooted or went to sleep, link glitch, manual stop) must
+            // not arm an automatic unlock on reconnect.
+            if proximityUnlockEnabled, liveLocked == true, !intentionalStop, let last = rssi, last < -85 {
+                awayLatched = true; nearCount = 0
+            }
             ctxCounter = nil; ctxEncVer = nil
             // Auto-reconnect unless stopped on purpose: a pending connect that iOS
             // completes as soon as the lock is back in range — also in the background.

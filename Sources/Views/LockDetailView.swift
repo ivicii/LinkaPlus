@@ -103,25 +103,22 @@ struct LockDetailView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // Adapt to the phone: hide the map on short screens, shrink the lock.
-            let compact = geo.size.height < 640
-            let lockSize = min(230, max(140, geo.size.height - (compact ? 320 : 470)))
+            // Shrink the lock on short screens. The map always stays: the screen
+            // scrolls, and the map is the only way to the full-screen map.
+            let lockSize = min(230, max(140, geo.size.height - 470))
             // Fills the screen when everything fits; scrolls when it doesn't (large
             // text, landscape, small phones) — and gives pull-to-refresh.
             ScrollView {
                 VStack(spacing: 0) {
-                    if !compact {
-                        compactMap
-                        if let parked { parkedCard(parked) }
-                        Spacer(minLength: 10)
-                    } else if let parked {
-                        parkedCard(parked)
-                    }
+                    compactMap
+                    if let parked { parkedCard(parked) }
+                    Spacer(minLength: 10)
                     heroControl(size: lockSize)
                     Spacer(minLength: 10)
                     mainButtons
                 }
-                .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
+                .frame(maxWidth: 560, minHeight: geo.size.height, alignment: .top)   // iPad: no 1000 pt wide buttons
+                .frame(maxWidth: .infinity)
             }
             .scrollIndicators(.hidden)
         }
@@ -134,6 +131,7 @@ struct LockDetailView: View {
                 Button { showSettings = true } label: {
                     Image(systemName: "slider.horizontal.3")
                 }
+                .accessibilityLabel("Instellingen")
             }
         }
         .navigationDestination(isPresented: $showSettings) { settingsPage }
@@ -145,7 +143,12 @@ struct LockDetailView: View {
             parked = ParkedStore.load(serial: lock.serial_no)
             ble.proximityUnlockEnabled = LockPrefs.bool("proximityUnlock", serial: lock.serial_no)
             LockNotifier.shared.requestAuth()
-            heroLocked = ble.liveLocked ?? lock.is_locked ?? true
+            // Only trust the controller's live state when it belongs to this lock.
+            // Seeding lastKnownLock makes the first open/close after entering the
+            // screen count as a real transition (activity log + parked spot).
+            let mine = lock.serial_no.map { ble.currentSerial?.caseInsensitiveCompare($0) == .orderedSame } ?? false
+            lastKnownLock = mine ? ble.liveLocked : nil
+            heroLocked = lastKnownLock ?? lock.is_locked ?? true
             loc.start()
             await startBLE()
             await load()
@@ -155,12 +158,17 @@ struct LockDetailView: View {
         .onChange(of: ble.liveLocked) { v in
             guard let v else { return }
             heroLocked = v
+            if lastKnownLock != nil, lastKnownLock != v {
+                UIAccessibility.post(notification: .announcement, argument: v ? "Slot vergrendeld" : "Slot ontgrendeld")
+            }
             // Record real transitions (not the first state seen after connecting).
             if let prev = lastKnownLock, prev != v {
                 LocalActivityLog.record(kind: v ? "close" : "open", battery: ble.batteryLevelBLE, serial: lock.serial_no)
                 localActs = LocalActivityLog.load(serial: lock.serial_no)
                 // Lock just closed → remember where the bike is parked (phone's GPS).
-                if v, let here = loc.coordinate {
+                // Only a fresh fix: after returning to the app the last known
+                // position can still be the previous place.
+                if v, let here = loc.coordinate, let fix = loc.fixDate, Date().timeIntervalSince(fix) < 120 {
                     ParkedStore.save(here, accuracy: loc.accuracy, serial: lock.serial_no)
                     parked = ParkedStore.load(serial: lock.serial_no)
                 }
@@ -183,6 +191,7 @@ struct LockDetailView: View {
             case .rejected, .blocked, .timeout:
                 if let known = knownLocked { heroLocked = known }
                 Haptic.warning()
+                UIAccessibility.post(notification: .announcement, argument: "Niet gelukt, probeer opnieuw")
             default: break
             }
             // Don't leave a stale "gelukt" row on screen.
@@ -349,8 +358,12 @@ struct LockDetailView: View {
                             .foregroundStyle(Theme.danger)
                     }
                     Button { loadSim() } label: {
-                        Label("Vernieuwen", systemImage: "arrow.clockwise")
+                        HStack {
+                            Label("Vernieuwen", systemImage: "arrow.clockwise")
+                            if simLoading { Spacer(); ProgressView() }
+                        }
                     }
+                    .disabled(simLoading)
                 } else {
                     Button(action: loadSim) {
                         HStack {
@@ -361,7 +374,7 @@ struct LockDetailView: View {
                     .disabled(simLoading || lock.serial_no == nil)
                 }
                 if let simError {
-                    Text(simError).font(.caption).foregroundStyle(.secondary)
+                    Text(simError).font(.caption).foregroundStyle(Theme.danger)
                 }
                 if let sim {
                     if sim.data_plan_enabled == true {
@@ -384,10 +397,10 @@ struct LockDetailView: View {
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
                     if let t = simFetchedAt {
-                        Label("Status opgehaald om \(DateUtils.timeHM(t)) · tik Vernieuwen voor live",
+                        Label("Status opgehaald om \(DateUtils.timeHM(t)) · tik op Vernieuwen voor de actuele status",
                               systemImage: "clock")
                     }
-                    Text("Haalt de cellulaire status op (zelfde call als de officiële app gebruikt). De teller kan iets achterlopen op de provider. Betalen gebeurt apart; dit vraagt alleen de status op.")
+                    Text("De teller kan iets achterlopen. Hier vraag je alleen de status op; betalen gaat apart.")
                 }
             }
     }
@@ -395,21 +408,9 @@ struct LockDetailView: View {
     @ViewBuilder
     private var geavanceerdSection: some View {
         Section {
-            Button {
-                showBLEControl = true
-            } label: {
-                Label("Geavanceerde bediening & auto-test", systemImage: "wrench.and.screwdriver")
-            }
-            Button {
-                showBLE = true
-            } label: {
-                Label("Bluetooth-diagnose", systemImage: "dot.radiowaves.right")
-            }
-            Button {
-                showFirmware = true
-            } label: {
-                Label("Firmware ophalen (analyse)", systemImage: "cpu")
-            }
+            actionRow("Geavanceerde bediening & auto-test", "wrench.and.screwdriver") { showBLEControl = true }
+            actionRow("Bluetooth-diagnose", "dot.radiowaves.right") { showBLE = true }
+            actionRow("Firmware ophalen (analyse)", "cpu") { showFirmware = true }
         } header: {
             Text("Geavanceerd")
         } footer: {
@@ -520,7 +521,7 @@ struct LockDetailView: View {
             .navigationTitle("Geparkeerde fiets")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Sluit") { showParkedSheet = false } }
+                ToolbarItem(placement: .cancellationAction) { Button("Gereed") { showParkedSheet = false } }
                 ToolbarItem(placement: .destructiveAction) {
                     if parked != nil {
                         Button(role: .destructive) {
@@ -549,7 +550,7 @@ struct LockDetailView: View {
             .navigationTitle(displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Sluit") { showFullMap = false } }
+                ToolbarItem(placement: .cancellationAction) { Button("Gereed") { showFullMap = false } }
                 ToolbarItem(placement: .confirmationAction) {
                     if let coordinate {
                         Button { openInMaps(coordinate) } label: { Label("Route", systemImage: "car.fill") }
@@ -594,7 +595,7 @@ struct LockDetailView: View {
                             .foregroundStyle(.primary)
                         Spacer()
                         if busy && activities.isEmpty { ProgressView() }
-                        else { Text("\(allActivities.filter { !$0.isBatterySample }.count)").foregroundStyle(.secondary) }
+                        else { Text("\((activities + localActs).filter { !$0.isBatterySample }.count)").foregroundStyle(.secondary) }
                         Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
                             .foregroundStyle(.tertiary)
                     }
@@ -602,8 +603,8 @@ struct LockDetailView: View {
             }
 
             Section("Delen & beheer") {
-                Button { showSharing = true } label: { Label("Delen & toegang", systemImage: "person.2.fill") }
-                Button { renameText = displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
+                actionRow("Delen & toegang", "person.2.fill") { showSharing = true }
+                actionRow("Hernoemen", "pencil") { renameText = displayName; showRename = true }
                 if let serial = lock.serial_no {
                     NavigationLink {
                         OwnershipView(serial: serial, lockName: displayName)
@@ -644,6 +645,19 @@ struct LockDetailView: View {
             Button("OK", role: .cancel) { renameError = nil }
         } message: {
             Text(renameError ?? "")
+        }
+    }
+
+    /// A row that opens a sheet/dialog — same look as the push rows next to it
+    /// (primary text, tinted icon, chevron), instead of an all-blue button.
+    private func actionRow(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Label { Text(title).foregroundStyle(.primary) } icon: { Image(systemName: icon) }
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
         }
     }
 
@@ -744,7 +758,8 @@ struct LockDetailView: View {
                 else { Text(heroSubtitle).font(.footnote).foregroundStyle(.secondary) }
             }
             .multilineTextAlignment(.center)
-            .frame(minHeight: 34)
+            .lineLimit(2).minimumScaleFactor(0.85)
+            .frame(minHeight: 44)
 
             statCard
         }
@@ -765,10 +780,12 @@ struct LockDetailView: View {
             .foregroundStyle(ble.ready ? Color.primary : Color.secondary)
             .padding(.horizontal, 12).padding(.vertical, 7)
             .background(Capsule().fill(Color(.secondarySystemBackground)))
+            .frame(minHeight: 44).contentShape(Rectangle())   // full-size tap target
         }
         .buttonStyle(.plain)
         .allowsHitTesting(reconnectable)
         .accessibilityElement(children: .combine)
+        .accessibilityHint(reconnectable ? "Tik om opnieuw te verbinden" : "")
     }
 
     private var statCard: some View {
@@ -795,6 +812,8 @@ struct LockDetailView: View {
             Text(title).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title): \(value)")
     }
 
     private var compactMap: some View {
@@ -861,7 +880,7 @@ struct LockDetailView: View {
                     else if ble.ready { ble.sirenOn() }
                     else { playSiren() }
                 } label: {
-                    Label(sirenActive ? "Alarm stop" : (sirenBusy ? "Bezig…" : "Alarm"),
+                    Label(sirenActive ? "Sirene stoppen" : (sirenBusy ? "Bezig…" : "Sirene"),
                           systemImage: sirenActive ? "speaker.slash.fill" : "speaker.wave.3.fill")
                         .frame(maxWidth: .infinity)
                 }
@@ -871,7 +890,7 @@ struct LockDetailView: View {
             .controlSize(.regular)
 
             if let e = bleKeyError {
-                Text(e).font(.caption2).foregroundStyle(Theme.danger)
+                Text(e).font(.footnote).foregroundStyle(Theme.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -885,7 +904,7 @@ struct LockDetailView: View {
         case .rejected:
             Label("Geweigerd — probeer opnieuw", systemImage: "xmark.circle.fill").foregroundStyle(Theme.danger).font(.callout)
         case .blocked:
-            Label("Niet gelukt — beweging of blokkade gedetecteerd. Houd het slot stil en probeer opnieuw.",
+            Label("Geblokkeerd — houd het slot stil en probeer opnieuw.",
                   systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.warn).font(.callout)
         case .timeout:
             Label("Geen reactie van het slot — opnieuw proberen.", systemImage: "clock.badge.exclamationmark")
@@ -919,9 +938,12 @@ struct LockDetailView: View {
         // On reappear the view (and its keys) may be reused → just re-scan.
         if bleStarted {
             if !ble.ready { ble.start() }
+            maybeAutoUnlock()   // link may already be live: no onChange will fire
             return
         }
         bleKeyError = nil
+        // This screen must never operate another lock the controller still holds.
+        ble.release(unless: serial)
         // 1) Connect right away with the key cached on this phone — no waiting on
         //    the network (bike shed, basement, slow 4G).
         let cached = LockCache.loadKeys(serial: serial)
@@ -929,6 +951,7 @@ struct LockDetailView: View {
             bleStarted = true
             ble.configure(keys: c, serial: serial, nameHint: displayName)
             ble.start()
+            maybeAutoUnlock()   // link may already be live: no onChange will fire
         }
         // 2) Refresh the key from the cloud; switch over only if it changed.
         do {
@@ -950,7 +973,7 @@ struct LockDetailView: View {
         } catch {
             // Cloud unavailable → keep working on the cached key, if there is one.
             if !bleStarted {
-                bleKeyError = "Geen sleutel gevonden (cloud onbereikbaar en geen offline cache)."
+                bleKeyError = "Geen sleutel op deze telefoon. Maak verbinding met internet en open het slot opnieuw."
             }
         }
     }
@@ -1064,7 +1087,7 @@ struct LockDetailView: View {
             do {
                 try await api.enableDataPlan(serial: serial, enabled: enabled, auth: session.identity())
             } catch {
-                simError = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error)"
+                simError = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error.localizedDescription)"
             }
             loadSim()   // refresh status (manages simLoading)
         }
@@ -1082,7 +1105,7 @@ struct LockDetailView: View {
                 sim = try await api.simStatus(serial: serial, lat: lat, lng: lng, auth: session.identity())
                 simFetchedAt = Date()
             } catch {
-                simError = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error)"
+                simError = (error as? LocalizedError)?.errorDescription ?? "Mislukt: \(error.localizedDescription)"
             }
             cards = (try? await api.getCards(auth: session.identity())) ?? cards
             simLoading = false
@@ -1095,12 +1118,12 @@ struct LockDetailView: View {
         Task {
             do {
                 try await api.renameLock(name: name, serial: serial,
-                                         isLocked: liveLocked, lockType: "original", auth: session.identity())
+                                         isLocked: liveLocked, lockType: lock.lock_type ?? "original", auth: session.identity())
                 customName = name          // title, map pin and sheets update at once
                 router.locksChanged += 1   // the list reloads in the background
                 Haptic.success()
             } catch {
-                renameError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                renameError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
     }
@@ -1114,10 +1137,10 @@ struct LockDetailView: View {
                 try await api.activateSiren(serial: serial, auth: session.identity())
                 sirenMessage = "Sirene geactiveerd — luister naar je slot."
             } catch {
-                let raw = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                let raw = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 if raw.localizedCaseInsensitiveContains("not currently")
                     || raw.localizedCaseInsensitiveContains("not active") {
-                    sirenMessage = "Het slot heeft nu geen actieve sessie met de server (\"\(raw)\"). De LEO slaapt om batterij te sparen en meldt zich maar af en toe — probeer het zo nog eens, of wek het slot door het te bewegen. Vlakbij werkt de Bluetooth-sirene altijd."
+                    sirenMessage = "Je slot is nu niet via internet bereikbaar: het slaapt om de batterij te sparen. Beweeg het slot en probeer het opnieuw. Vlakbij werkt de sirene altijd via Bluetooth."
                 } else {
                     sirenMessage = "Mislukt: \(raw)"
                 }
@@ -1156,7 +1179,7 @@ struct LockDetailView: View {
                 return d0 > d1
             }
         } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         busy = false
     }

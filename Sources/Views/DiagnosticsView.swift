@@ -61,7 +61,7 @@ struct DiagnosticsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Sluit") { dismiss() }
+                    Button("Gereed") { dismiss() }
                 }
             }
             .alert("SIM-status opvragen?", isPresented: $simConfirm) {

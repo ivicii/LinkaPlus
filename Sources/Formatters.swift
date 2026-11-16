@@ -28,7 +28,7 @@ enum DateUtils {
 
     /// Try ISO first, then epoch.
     static func parseAny(_ s: String?) -> Date? {
-        parseISO(s) ?? parseEpoch(s)
+        parseEpoch(s) ?? parseISO(s)   // epoch check is cheap; ISO parsing is not
     }
 
     private static let display: DateFormatter = {
