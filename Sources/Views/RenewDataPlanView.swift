@@ -42,7 +42,12 @@ struct RenewDataPlanView: View {
                     }
                     if let message {
                         Text(message).font(.footnote)
-                            .foregroundStyle(done ? .green : .secondary)
+                            .foregroundStyle(done ? Theme.success : Color.secondary)
+                    }
+                    if !loading && paymentSheet == nil && !done {
+                        Button { Task { await load() } } label: {
+                            Label("Opnieuw proberen", systemImage: "arrow.clockwise")
+                        }
                     }
                 } header: {
                     Text("Dataplan verlengen")
@@ -55,8 +60,11 @@ struct RenewDataPlanView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(done ? "Klaar" : "Annuleer") { dismiss() }
+                        .disabled(working)
                 }
             }
+            // Don't lose the screen halfway through paying / activating.
+            .interactiveDismissDisabled(working)
             .task { await load() }
         }
     }

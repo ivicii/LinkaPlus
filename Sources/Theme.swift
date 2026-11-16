@@ -64,18 +64,3 @@ struct PressableStyle: ButtonStyle {
             .animation(.spring(response: 0.3, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
-
-/// Minimal iOS-16-safe "empty state" view (ContentUnavailableView is iOS 17+).
-struct ContentUnavailableView_: View {
-    let title: String, icon: String, message: String
-    init(_ title: String, _ icon: String, _ message: String) { self.title = title; self.icon = icon; self.message = message }
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: icon).font(.largeTitle).foregroundStyle(.secondary)
-            Text(title).font(.headline)
-            Text(message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}

@@ -43,6 +43,7 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var readFrames: [String] = []
     @Published private(set) var lastReadLabel: String?
     private var awaitingRead: String?
+    private var readQueue: [Int] = []
     private var pendingReadIdx: Int?
     private var replyReceived = false
 
@@ -626,11 +627,15 @@ final class BLEController: NSObject, ObservableObject {
     /// Reads settings one by one (each command needs the fresh counter the lock
     /// hands out after the previous one). Results land in `settingValues`.
     func readSettings(_ idxs: [Int]) {
-        guard ready, !reading else { return }
+        guard ready else { return }
+        // Queue instead of dropping: a read requested while another one runs (page
+        // opened during a read-back, or the read-back after a write) still happens.
+        for i in idxs where !readQueue.contains(i) { readQueue.append(i) }
+        guard !reading else { return }
         reading = true
         Task {
-            for idx in idxs {
-                guard ready else { break }
+            while ready, !readQueue.isEmpty {
+                let idx = readQueue.removeFirst()
                 pendingReadIdx = idx
                 replyReceived = false
                 awaitingRead = "Param \(idx)"
@@ -641,6 +646,7 @@ final class BLEController: NSObject, ObservableObject {
                 awaitingRead = nil
                 pendingReadIdx = nil
             }
+            readQueue = []
             reading = false
         }
     }
@@ -905,7 +911,8 @@ extension BLEController: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
         Task { @MainActor in
             guard error == nil else { return }
-            rssi = RSSI.intValue
+            // Only publish a change — this fires every 0.7 s and redraws all observers.
+            if rssi != RSSI.intValue { rssi = RSSI.intValue }
             handleProximity(RSSI.intValue)
         }
     }

@@ -87,6 +87,7 @@ struct AddLockView: View {
                 }
             }
             .interactiveDismissDisabled(pc.busy)
+            .onDisappear { if pc.scanning { pc.stopScan() } }
             .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { pc.startScan() } }
             .alert("Dit slot koppelen?", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
                 Button("Annuleer", role: .cancel) { confirm = nil }

@@ -264,4 +264,8 @@ struct LockActivity: Decodable, Identifiable {
         guard let lat = latitude, let lon = longitude else { return false }
         return !(lat == 0 && lon == 0)
     }
+
+    /// A locally logged battery reading (no open/close event). It feeds the
+    /// battery chart only and must not count as lock activity.
+    var isBatterySample: Bool { owner == "local" && msg_title == nil }
 }

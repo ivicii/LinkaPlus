@@ -25,8 +25,12 @@ struct APIClient {
 
     init() {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.waitsForConnectivity = true
+        // Fail fast when there is no network: with waitsForConnectivity a request
+        // waits (up to days) for a connection, so the offline fall-backs — cached
+        // lock list, cached Bluetooth key — would never kick in.
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 60
+        config.waitsForConnectivity = false
         self.session = URLSession(configuration: config)
     }
 

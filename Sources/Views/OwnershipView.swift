@@ -69,6 +69,8 @@ struct OwnershipView: View {
         }
         .navigationTitle("Eigendom wijzigen")
         .navigationBarTitleDisplayMode(.inline)
+        // Leaving halfway through a transfer/removal would hide its outcome.
+        .navigationBarBackButtonHidden(busy)
         .alert("Eigendom overdragen?", isPresented: $confirmTransfer) {
             Button("Annuleer", role: .cancel) {}
             Button("Overdragen", role: .destructive) { transfer() }

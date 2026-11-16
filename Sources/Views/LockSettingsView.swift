@@ -140,11 +140,23 @@ struct SlotSettingsPage: View {
                         .font(.footnote).foregroundStyle(Theme.warn)
                 }
             }
-            if let r = ble.commandResult { Section { resultLabel(r) } }
             content
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        // Result as a toast at the bottom: a row at the top pushed the whole list
+        // down (and the control you were tapping away from under your finger).
+        .safeAreaInset(edge: .bottom) {
+            if let r = ble.commandResult {
+                resultLabel(r)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(.regularMaterial, in: Capsule())
+                    .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+                    .padding(.horizontal, 16).padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: ble.commandResult)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if ble.reading { ProgressView() }
@@ -365,6 +377,7 @@ struct SlotSettingsPage: View {
                         UIPasteboard.general.string = ble.settingValues.sorted { $0.key < $1.key }
                             .map { "idx \($0.key) = \($0.value)  (v2 \(ble.settingValues2[$0.key] ?? 0))" }.joined(separator: "\n")
                         Haptic.tap(.light); copied = true
+                        Task { try? await Task.sleep(nanoseconds: 2_000_000_000); copied = false }
                     } label: {
                         Label(copied ? "Gekopieerd ✓" : "Kopieer alle waarden", systemImage: copied ? "checkmark" : "doc.on.doc")
                     }

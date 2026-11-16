@@ -13,6 +13,7 @@ struct LockListView: View {
     @State private var offline = false
     @State private var path: [Lock] = []
     @State private var confirmSignOut = false
+    @State private var sessionExpired = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -29,12 +30,20 @@ struct LockListView: View {
                     )
                 } else {
                     List {
-                        if offline {
+                        if sessionExpired {
+                            Section {
+                                Label("Je sessie lijkt verlopen — dit zijn opgeslagen gegevens. Bluetooth-bediening werkt nog.",
+                                      systemImage: "person.crop.circle.badge.exclamationmark")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.warn)
+                                Button("Opnieuw inloggen") { confirmSignOut = true }
+                            }
+                        } else if offline {
                             Section {
                                 Label("Offline — opgeslagen gegevens. Bluetooth-bediening werkt.",
                                       systemImage: "wifi.slash")
                                     .font(.caption)
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(Theme.warn)
                             }
                         }
                         ForEach(locks) { lock in
@@ -117,6 +126,9 @@ struct LockListView: View {
             Button("Opnieuw proberen") { Task { await load() } }
                 .buttonStyle(.borderedProminent)
                 .padding(.top, 4)
+            if sessionExpired {
+                Button("Opnieuw inloggen") { confirmSignOut = true }
+            }
         }
         .padding(32)
     }
@@ -126,8 +138,11 @@ struct LockListView: View {
         do {
             locks = try await api.getLocks(auth: session.identity())
             LockCache.saveLocks(locks)
-            offline = false
+            offline = false; sessionExpired = false
         } catch {
+            // Token no longer accepted → say so, instead of a vague "offline".
+            if let apiError = error as? APIError, case .http(let code, _) = apiError,
+               code == 401 || code == 403 { sessionExpired = true }
             let cached = LockCache.loadLocks()
             if !cached.isEmpty {
                 locks = cached

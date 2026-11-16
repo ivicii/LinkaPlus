@@ -19,6 +19,19 @@ final class BLEManager: NSObject, ObservableObject {
 
     enum State: String {
         case idle, poweredOff, unauthorized, scanning, connecting, discovering, connected, disconnected
+
+        var label: String {
+            switch self {
+            case .idle: return "Niet gestart"
+            case .poweredOff: return "Bluetooth staat uit"
+            case .unauthorized: return "Geen Bluetooth-toestemming"
+            case .scanning: return "Zoeken…"
+            case .connecting: return "Verbinden…"
+            case .discovering: return "Profiel uitlezen…"
+            case .connected: return "Verbonden"
+            case .disconnected: return "Verbinding verbroken"
+            }
+        }
     }
 
     @Published private(set) var state: State = .idle
@@ -49,6 +62,13 @@ final class BLEManager: NSObject, ObservableObject {
             add("Bluetooth niet aan (\(central.state.rawValue)).")
             return
         }
+        // A lock that is already connected (by the app's main controller) does not
+        // advertise, so a scan would never find it — attach to the existing link.
+        if let p = central.retrieveConnectedPeripherals(withServices: [LinkaBLE.service]).first {
+            add("Slot is al verbonden — bestaande verbinding gebruiken.")
+            connect(p)
+            return
+        }
         state = .scanning
         add("Scannen…")
         // Scan broadly (some locks don't advertise the 128-bit service UUID).
@@ -59,8 +79,10 @@ final class BLEManager: NSObject, ObservableObject {
     func stop() {
         central.stopScan()
         if let p = peripheral { central.cancelPeripheralConnection(p) }
-        if state == .scanning { state = .idle }
+        if state == .scanning || state == .connecting { state = .idle }
     }
+
+    func fullLog() -> String { log.reversed().joined(separator: "\n") }
 
     private func connect(_ p: CBPeripheral) {
         central.stopScan()

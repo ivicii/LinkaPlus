@@ -15,10 +15,6 @@ struct LockDetailView: View {
     @State private var sirenBusy = false
     @State private var sirenMessage: String?
 
-    @State private var recoveryOn = false
-    @State private var recoveryBusy = false
-    @State private var recoveryMessage: String?
-    @State private var confirmEnable = false
     @State private var routePoints: [CLLocationCoordinate2D] = []
 
     @State private var showBLE = false
@@ -110,19 +106,24 @@ struct LockDetailView: View {
             // Adapt to the phone: hide the map on short screens, shrink the lock.
             let compact = geo.size.height < 640
             let lockSize = min(230, max(140, geo.size.height - (compact ? 320 : 470)))
-            VStack(spacing: 0) {
-                if !compact {
-                    compactMap
-                    if let parked { parkedCard(parked) }
+            // Fills the screen when everything fits; scrolls when it doesn't (large
+            // text, landscape, small phones) — and gives pull-to-refresh.
+            ScrollView {
+                VStack(spacing: 0) {
+                    if !compact {
+                        compactMap
+                        if let parked { parkedCard(parked) }
+                        Spacer(minLength: 10)
+                    } else if let parked {
+                        parkedCard(parked)
+                    }
+                    heroControl(size: lockSize)
                     Spacer(minLength: 10)
-                } else if let parked {
-                    parkedCard(parked)
+                    mainButtons
                 }
-                heroControl(size: lockSize)
-                Spacer(minLength: 10)
-                mainButtons
+                .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .scrollIndicators(.hidden)
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
@@ -198,6 +199,12 @@ struct LockDetailView: View {
             await load()
             await syncRecoveryState()
             loadSim()
+        }
+        .alert("Sirene", isPresented: Binding(get: { sirenMessage != nil },
+                                                set: { if !$0 { sirenMessage = nil } })) {
+            Button("OK", role: .cancel) { sirenMessage = nil }
+        } message: {
+            Text(sirenMessage ?? "")
         }
         .sheet(isPresented: $showFullMap) { fullMapSheet }
         .sheet(isPresented: $showParkedSheet) { parkedSheet }
@@ -386,49 +393,6 @@ struct LockDetailView: View {
     }
 
     @ViewBuilder
-    private var trackingSection: some View {
-        Section {
-            if recoveryOn {
-                Button(role: .destructive) { setRecovery(false) } label: {
-                    HStack {
-                        if recoveryBusy { ProgressView() }
-                        Label("Stop tracking (recovery)", systemImage: "stop.circle.fill")
-                    }
-                }
-                .disabled(recoveryBusy)
-                Button {
-                    Task { await refreshRoute() }
-                } label: {
-                    Label("Route verversen (\(routePoints.count) punten)", systemImage: "arrow.clockwise")
-                }
-            } else {
-                Button { confirmEnable = true } label: {
-                    HStack {
-                        if recoveryBusy { ProgressView() }
-                        Label("Zet in tracking-/recovery-modus", systemImage: "dot.radiowaves.left.and.right")
-                    }
-                }
-                .disabled(recoveryBusy || lock.serial_no == nil)
-            }
-            if let recoveryMessage {
-                Text(recoveryMessage).font(.caption).foregroundStyle(.secondary)
-            }
-        } header: {
-            Text("Locatie & tracking")
-        } footer: {
-            Text("Op de LEO armt de anti-diefstal/tracking meestal vanzelf: sluit het slot, dan houdt het bij beweging zelf de GPS bij en mailt je. Handmatig starten kan \"not currently active\" geven als er geen actieve trackingsessie is. Vereist resterende data in je dataplan.")
-        }
-    }
-
-    @ViewBuilder
-    private var beheerSection: some View {
-        Section("Delen & beheer") {
-            Button { showSharing = true } label: { Label("Delen & toegang", systemImage: "person.2.fill") }
-            Button { renameText = displayName; showRename = true } label: { Label("Hernoemen", systemImage: "pencil") }
-        }
-    }
-
-    @ViewBuilder
     private var geavanceerdSection: some View {
         Section {
             Button {
@@ -450,54 +414,6 @@ struct LockDetailView: View {
             Text("Geavanceerd")
         } footer: {
             Text("Alleen nodig als de normale Open/Sluit niet werkt: handmatige sleutel/kanaal/teller en het GATT-profiel.")
-        }
-    }
-
-    @ViewBuilder
-    private var activiteitenSection: some View {
-        Section {
-            Button { showStats = true } label: {
-                HStack {
-                    Label("Statistieken & activiteiten", systemImage: "chart.bar.fill")
-                    Spacer()
-                    if busy && activities.isEmpty {
-                        ProgressView()
-                    } else {
-                        Text("\(activities.count)").foregroundStyle(.secondary)
-                    }
-                }
-            }
-        } footer: {
-            Text("Grafieken, open/dicht-tellers en de volledige activiteitenlijst (tik op de tegel \"Activiteiten\").")
-        }
-    }
-
-    // MARK: - Main sections
-
-    @ViewBuilder
-    private var mapSection: some View {
-        Section {
-            Button { showFullMap = true } label: {
-                mapView
-                    .frame(height: 220)
-                    .overlay(alignment: .topTrailing) {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.footnote.weight(.bold))
-                            .foregroundStyle(.primary)
-                            .padding(8)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .padding(10)
-                    }
-            }
-            .buttonStyle(.plain)
-            .listRowInsets(EdgeInsets())
-        } footer: {
-            if let d = lastLocationDate {
-                Label("Locatie bijgewerkt: \(DateUtils.absoluteWithRelative(d)) · tik om te vergroten",
-                      systemImage: "clock.arrow.circlepath")
-            } else {
-                Text("Tijd van laatste locatie onbekend. Tik op de kaart om te vergroten.")
-            }
         }
     }
 
@@ -569,42 +485,6 @@ struct LockDetailView: View {
     }
 
     @ViewBuilder
-    private var soundSection: some View {
-        Section {
-            if ble.ready {
-                Button { Haptic.tap(); ble.sirenOn() } label: {
-                    Label("Geluid afspelen", systemImage: "speaker.wave.3.fill")
-                }
-                Button(role: .destructive) { ble.sirenOff() } label: {
-                    Label("Geluid uit", systemImage: "speaker.slash.fill")
-                }
-            } else {
-                Label("Wacht op Bluetooth-verbinding…", systemImage: "antenna.radiowaves.left.and.right.slash")
-                    .foregroundStyle(.secondary)
-                if ble.state == "verbroken" || ble.state == "gestopt" {
-                    Button { ble.start() } label: {
-                        Label("Opnieuw verbinden", systemImage: "arrow.clockwise")
-                    }
-                }
-                Button(action: playSiren) {
-                    HStack {
-                        if sirenBusy { ProgressView() }
-                        Label("Toch via cloud proberen", systemImage: "cloud")
-                    }
-                }
-                .disabled(sirenBusy || lock.serial_no == nil)
-                if let sirenMessage { Text(sirenMessage).font(.caption).foregroundStyle(.secondary) }
-            }
-        } header: {
-            Text("Geluid")
-        } footer: {
-            Text(ble.ready
-                 ? "Via Bluetooth — werkt lokaal, ook zonder dataplan."
-                 : "Geluid afspelen werkt betrouwbaar via Bluetooth (dichtbij het slot). De cloud-variant lukt alleen als het slot net online is, anders geeft de server \"not currently active\".")
-        }
-    }
-
-    @ViewBuilder
     private var parkedSheet: some View {
         NavigationStack {
             Group {
@@ -632,8 +512,9 @@ struct LockDetailView: View {
                             }
                     }
                 } else {
-                    ContentUnavailableView_("Nog geen parkeerplek", "bicycle",
-                        "Zodra je het slot sluit terwijl je telefoon een locatie heeft, wordt die hier bewaard.")
+                    ContentUnavailableViewCompat(
+                        title: "Nog geen parkeerplek", systemImage: "bicycle",
+                        description: "Zodra je het slot sluit terwijl je telefoon een locatie heeft, wordt die hier bewaard.")
                 }
             }
             .navigationTitle("Geparkeerde fiets")
@@ -713,7 +594,7 @@ struct LockDetailView: View {
                             .foregroundStyle(.primary)
                         Spacer()
                         if busy && activities.isEmpty { ProgressView() }
-                        else { Text("\(allActivities.count)").foregroundStyle(.secondary) }
+                        else { Text("\(allActivities.filter { !$0.isBatterySample }.count)").foregroundStyle(.secondary) }
                         Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
                             .foregroundStyle(.tertiary)
                     }
@@ -980,11 +861,12 @@ struct LockDetailView: View {
                     else if ble.ready { ble.sirenOn() }
                     else { playSiren() }
                 } label: {
-                    Label(sirenActive ? "Alarm stop" : "Alarm",
+                    Label(sirenActive ? "Alarm stop" : (sirenBusy ? "Bezig…" : "Alarm"),
                           systemImage: sirenActive ? "speaker.slash.fill" : "speaker.wave.3.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered).tint(Theme.danger)
+                .disabled(sirenBusy)
             }
             .controlSize(.regular)
 
@@ -1040,23 +922,37 @@ struct LockDetailView: View {
             return
         }
         bleKeyError = nil
-        var keys: AccessKeys?
+        // 1) Connect right away with the key cached on this phone — no waiting on
+        //    the network (bike shed, basement, slow 4G).
+        let cached = LockCache.loadKeys(serial: serial)
+        if let c = cached, c.commandKey != nil {
+            bleStarted = true
+            ble.configure(keys: c, serial: serial, nameHint: displayName)
+            ble.start()
+        }
+        // 2) Refresh the key from the cloud; switch over only if it changed.
         do {
-            // Fresh from the cloud, and cache it for offline use.
             let status = try await api.checkKeyStatus(serial: serial, auth: session.identity())
-            keys = status.key
-            if let k = keys, k.commandKey != nil { LockCache.saveKeys(k, serial: serial) }
+            if let k = status.key, let fresh = k.commandKey {
+                LockCache.saveKeys(k, serial: serial)
+                let old = cached?.commandKey
+                if !bleStarted || old?.hex != fresh.hex || old?.admin != fresh.admin {
+                    bleStarted = true
+                    ble.configure(keys: k, serial: serial, nameHint: displayName)
+                    if !ble.ready { ble.start() }
+                }
+            } else {
+                // The server answered and gives us no key (access revoked).
+                if bleStarted { ble.stop() }
+                bleStarted = false
+                bleKeyError = "Je hebt geen (geldige) sleutel meer voor dit slot."
+            }
         } catch {
-            // Cloud unavailable → use the cached key so Bluetooth still works.
-            keys = LockCache.loadKeys(serial: serial)
+            // Cloud unavailable → keep working on the cached key, if there is one.
+            if !bleStarted {
+                bleKeyError = "Geen sleutel gevonden (cloud onbereikbaar en geen offline cache)."
+            }
         }
-        guard let k = keys, k.commandKey != nil else {
-            bleKeyError = "Geen sleutel gevonden (cloud onbereikbaar en geen offline cache)."
-            return
-        }
-        bleStarted = true
-        ble.configure(keys: k, serial: serial, nameHint: displayName)
-        ble.start()
     }
 
     @ViewBuilder
@@ -1230,47 +1126,11 @@ struct LockDetailView: View {
         }
     }
 
-    private func setRecovery(_ enable: Bool) {
-        guard let serial = lock.serial_no else { return }
-        recoveryBusy = true; recoveryMessage = nil
-        Task {
-            do {
-                try await api.setRecoveryMode(serial: serial, enabled: enable, auth: session.identity())
-                recoveryOn = enable
-                if enable {
-                    recoveryMessage = "Tracking gestart. Het kan even duren voor de eerste GPS-punten binnen zijn — tik op 'Route verversen'."
-                    await refreshRoute()
-                } else {
-                    recoveryMessage = "Tracking gestopt."
-                    routePoints = []
-                }
-            } catch {
-                let raw = (error as? LocalizedError)?.errorDescription ?? "\(error)"
-                if raw.localizedCaseInsensitiveContains("not currently")
-                    || raw.localizedCaseInsensitiveContains("not active") {
-                    recoveryMessage = "De server kan tracking nu niet handmatig starten (\"\(raw)\"). Op de LEO armt tracking vanzelf: sluit het slot, dan houdt het bij beweging zelf de GPS bij en mailt je. Zorg dat er nog data over is in je dataplan."
-                } else {
-                    recoveryMessage = "Mislukt: \(raw)"
-                }
-            }
-            recoveryBusy = false
-        }
-    }
-
     /// Reads whether tracking is currently active (current_tracking succeeds
     /// only in tracking mode) and loads the route if so.
     private func syncRecoveryState() async {
         guard lock.serial_no != nil else { return }
-        if let pts = try? await trackingCoords() {
-            routePoints = pts
-            recoveryOn = true
-        } else {
-            recoveryOn = false
-        }
-    }
-
-    private func refreshRoute() async {
-        if let pts = try? await trackingCoords() { routePoints = pts }
+        routePoints = (try? await trackingCoords()) ?? []
     }
 
     private func trackingCoords() async throws -> [CLLocationCoordinate2D] {

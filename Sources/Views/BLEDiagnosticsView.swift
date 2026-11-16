@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Scans for the lock over Bluetooth, connects, and shows its GATT profile +
 /// incoming packets — so we can verify the protocol before writing commands.
@@ -14,7 +15,7 @@ struct BLEDiagnosticsView: View {
                     HStack {
                         Text("Status").bold()
                         Spacer()
-                        Text(ble.state.rawValue).foregroundStyle(.secondary)
+                        Text(ble.state.label).foregroundStyle(.secondary)
                     }
                     Button {
                         ble.startScan(nameHint: lockName)
@@ -59,6 +60,15 @@ struct BLEDiagnosticsView: View {
                 }
 
                 Section("Log") {
+                    if ble.log.isEmpty {
+                        Text("Nog geen log — tik op ‘Zoek & verbind met slot’.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Button {
+                            UIPasteboard.general.string = ble.fullLog()
+                            Haptic.tap(.light)
+                        } label: { Label("Kopieer log", systemImage: "doc.on.doc") }
+                    }
                     ForEach(Array(ble.log.enumerated()), id: \.offset) { _, line in
                         Text(line).font(.system(.caption2, design: .monospaced))
                             .textSelection(.enabled)
@@ -67,6 +77,8 @@ struct BLEDiagnosticsView: View {
             }
             .navigationTitle("Bluetooth-diagnose")
             .navigationBarTitleDisplayMode(.inline)
+            // Also when the sheet is swiped away: don't leave a scan running.
+            .onDisappear { ble.stop() }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Sluit") { ble.stop(); dismiss() }

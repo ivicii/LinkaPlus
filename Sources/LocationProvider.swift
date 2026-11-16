@@ -16,6 +16,8 @@ final class LocationProvider: NSObject, ObservableObject {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        // Without a filter every GPS tick republishes and redraws the whole screen.
+        manager.distanceFilter = 5
     }
 
     func start() {

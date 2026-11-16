@@ -18,6 +18,8 @@ struct FindLockView: View {
         proximity > 0.7 ? .green : (proximity > 0.4 ? .yellow : .orange)
     }
 
+    private var sirenActive: Bool { ble.statusFlags.contains("Sirene actief") }
+
     private var distanceText: String {
         guard let m = ble.estimatedMeters else { return "—" }
         if m < 1 { return "< 1 m" }
@@ -55,10 +57,15 @@ struct FindLockView: View {
                     }
                     .padding(.horizontal, 32)
 
-                    Button(action: onSiren) {
-                        Label("Laat sirene afspelen", systemImage: "speaker.wave.3.fill")
+                    Button {
+                        Haptic.tap()
+                        if sirenActive { ble.sirenOff() } else { onSiren() }
+                    } label: {
+                        Label(sirenActive ? "Sirene stoppen" : "Laat sirene afspelen",
+                              systemImage: sirenActive ? "speaker.slash.fill" : "speaker.wave.3.fill")
                             .frame(maxWidth: .infinity).padding()
-                            .background(tint.opacity(0.2)).clipShape(RoundedRectangle(cornerRadius: 14))
+                            .background((sirenActive ? Theme.danger : tint).opacity(0.2))
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous))
                     }
                     .padding(.horizontal, 24)
                     Spacer()
