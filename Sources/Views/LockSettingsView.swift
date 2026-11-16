@@ -140,17 +140,30 @@ struct SlotSettingsPage: View {
                         .font(.footnote).foregroundStyle(Theme.warn)
                 }
             }
-            if let r = ble.commandResult { Section { resultLabel(r) } }
             content
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        // Result as a toast at the bottom: a row at the top pushed the whole list
+        // down (and the control you were tapping away from under your finger).
+        .safeAreaInset(edge: .bottom) {
+            if let r = ble.commandResult {
+                resultLabel(r)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(.regularMaterial, in: Capsule())
+                    .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+                    .padding(.horizontal, 16).padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: ble.commandResult)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if ble.reading { ProgressView() }
                 else {
                     Button { load() } label: { Image(systemName: "arrow.clockwise") }
                         .disabled(!connected)
+                        .accessibilityLabel("Opnieuw uitlezen")
                 }
             }
         }
@@ -206,16 +219,18 @@ struct SlotSettingsPage: View {
                 Button { ble.setPowerMode(seconds: m.2) } label: {
                     VStack(spacing: 2) {
                         Text(m.0).font(.subheadline.weight(.semibold))
+                            .lineLimit(1).minimumScaleFactor(0.7)
                         Text(m.1).font(.caption2).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity).padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .background(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
                         .fill(on ? Theme.accent.opacity(0.22) : Color(.tertiarySystemFill)))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .overlay(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
                         .stroke(on ? Theme.accent : .clear, lineWidth: 1.5))
                 }
                 .buttonStyle(.plain)
                 .disabled(!connected)
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
     }
@@ -251,13 +266,13 @@ struct SlotSettingsPage: View {
                     .disabled(!connected || pacInput.count < 4)
                 }
             } header: { Text("PAC-code") } footer: {
-                Text("De tapcode om het slot zonder telefoon te openen. De app leest hem rechtstreeks uit het slot (GET_SETTING).")
+                Text("De tapcode om het slot zonder telefoon te openen.")
             }
             Section {
                 SettingToggleRow(title: "Bewegingsmelding", icon: "bell.badge", idx: 106,
                                  ble: ble, enabled: connected) { ble.setMovementAlarm($0) }
             } footer: {
-                Text("Het slot meldt beweging terwijl het dicht is (officiële instelling, index 106).")
+                Text("Het slot meldt beweging terwijl het vergrendeld is.")
             }
             Section {
                 stepper("Alarm-vertraging", unit: "s", icon: "timer", idx: 7, range: 0...60) { ble.setAlarmDelay($0) }
@@ -365,6 +380,7 @@ struct SlotSettingsPage: View {
                         UIPasteboard.general.string = ble.settingValues.sorted { $0.key < $1.key }
                             .map { "idx \($0.key) = \($0.value)  (v2 \(ble.settingValues2[$0.key] ?? 0))" }.joined(separator: "\n")
                         Haptic.tap(.light); copied = true
+                        Task { try? await Task.sleep(nanoseconds: 2_000_000_000); copied = false }
                     } label: {
                         Label(copied ? "Gekopieerd ✓" : "Kopieer alle waarden", systemImage: copied ? "checkmark" : "doc.on.doc")
                     }

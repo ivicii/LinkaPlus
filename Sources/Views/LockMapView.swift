@@ -27,15 +27,21 @@ struct LockMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
-        if let pin = map.annotations.first(where: { $0 is MKPointAnnotation }) as? MKPointAnnotation,
-           pin.coordinate.latitude != coordinate.latitude || pin.coordinate.longitude != coordinate.longitude {
-            pin.coordinate = coordinate
-            map.setCenter(coordinate, animated: true)
+        if let pin = map.annotations.first(where: { $0 is MKPointAnnotation }) as? MKPointAnnotation {
+            if pin.title != title { pin.title = title }   // lock was renamed
+            if pin.coordinate.latitude != coordinate.latitude || pin.coordinate.longitude != coordinate.longitude {
+                pin.coordinate = coordinate
+                map.setCenter(coordinate, animated: true)
+            }
         }
 
         // Redraw route overlay if it changed.
+        // Compare the number of points, not just "is there a line": otherwise a
+        // refreshed route with new GPS points would never be redrawn.
         let existing = map.overlays.compactMap { $0 as? MKPolyline }
-        if existing.count != (route.count > 1 ? 1 : 0) {
+        let drawn = existing.first?.pointCount ?? 0
+        let wanted = route.count > 1 ? route.count : 0
+        if existing.count > 1 || drawn != wanted {
             map.removeOverlays(map.overlays)
             if route.count > 1 {
                 map.addOverlay(MKPolyline(coordinates: route, count: route.count))

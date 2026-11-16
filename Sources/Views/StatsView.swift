@@ -60,9 +60,12 @@ struct StatsView: View {
         return .other
     }
 
+    /// Real lock events — without the periodic local battery samples.
+    private var events: [LockActivity] { activities.filter { !$0.isBatterySample } }
+
     private var opens: Int  { activities.filter { classify($0) == .open }.count }
     private var closes: Int { activities.filter { classify($0) == .close }.count }
-    private var lastUsed: Date? { activities.compactMap(date).max() }
+    private var lastUsed: Date? { events.compactMap(date).max() }
     private var currentBattery: Int? { activities.compactMap { $0.batteryPercent }.first { $0 > 0 } }
 
     // MARK: Bucketing
@@ -79,7 +82,7 @@ struct StatsView: View {
     private var buckets: [Bucket] {
         let cal = Calendar.current
         var map: [Date: Int] = [:]
-        for a in activities { if let d = date(a) { map[bucketStart(d, cal), default: 0] += 1 } }
+        for a in events { if let d = date(a) { map[bucketStart(d, cal), default: 0] += 1 } }
         let anchor = bucketStart(Date(), cal)
         return (0..<gran.count).reversed().compactMap { off -> Bucket? in
             guard let d = cal.date(byAdding: gran.component, value: -off, to: anchor) else { return nil }
@@ -129,17 +132,17 @@ struct StatsView: View {
             }
             .navigationTitle("Statistieken")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Sluit") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Gereed") { dismiss() } } }
             .navigationDestination(isPresented: $showActivityList) { activityListView }
         }
     }
 
     private var activityListView: some View {
         List {
-            if activities.isEmpty {
+            if events.isEmpty {
                 Text("Nog geen activiteiten.").foregroundStyle(.secondary)
             } else {
-                ForEach(activities) { ActivityRow(activity: $0) }
+                ForEach(events) { ActivityRow(activity: $0) }
             }
         }
         .navigationTitle("Activiteiten")
@@ -152,7 +155,7 @@ struct StatsView: View {
         Section {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 Button { Haptic.tap(.light); showActivityList = true } label: {
-                    tile("Activiteiten", "\(activities.count)", "list.bullet", Theme.accent, tappable: true)
+                    tile("Activiteiten", "\(events.count)", "list.bullet", Theme.accent, tappable: true)
                 }
                 .buttonStyle(.plain)
                 tile("Batterij", currentBattery.map { "\($0)%" } ?? "–", batteryIcon(currentBattery),
@@ -187,6 +190,7 @@ struct StatsView: View {
                     Spacer()
                     Button { selected = nil } label: { Image(systemName: "xmark.circle.fill") }
                         .foregroundStyle(.secondary)
+                        .accessibilityLabel("Selectie wissen")
                 } else {
                     Label("Tik op een balk voor details", systemImage: "hand.tap")
                         .font(.caption).foregroundStyle(.secondary)
@@ -213,6 +217,8 @@ struct StatsView: View {
             )
             .foregroundStyle(selected == b.date ? Theme.accent : Theme.accent.opacity(0.28))
             .cornerRadius(4)
+            .accessibilityLabel(fullLabel(b.date))
+            .accessibilityValue("\(b.count) activiteiten")
         }
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: 4))
@@ -229,6 +235,7 @@ struct StatsView: View {
         .chartOverlay { proxy in
             GeometryReader { geo in
                 Rectangle().fill(Color.clear).contentShape(Rectangle())
+                    .accessibilityHidden(true)
                     .onTapGesture { location in
                         let plot = geo[proxy.plotAreaFrame]
                         let xPos = location.x - plot.origin.x
@@ -297,7 +304,7 @@ struct StatsView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(Color(.tertiarySystemGroupedBackground))   // visible on a list row in dark mode
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
                         .strokeBorder(color.opacity(0.35), lineWidth: 1)

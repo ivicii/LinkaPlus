@@ -15,6 +15,7 @@ struct TrackingTestView: View {
 
     @State private var armed = false
     @State private var arming = false
+    @State private var stopping = false
     @State private var started: Date?
     @State private var points: [CLLocationCoordinate2D] = []
     @State private var lastUpdate: Date?
@@ -59,15 +60,16 @@ struct TrackingTestView: View {
                     .disabled(arming)
                 } else {
                     Button(role: .destructive) { stop() } label: {
-                        Label("Stop tracking", systemImage: "stop.circle.fill")
+                        Label(stopping ? "Bezig…" : "Stop tracking", systemImage: "stop.circle.fill")
                     }
+                    .disabled(stopping)
                 }
             } footer: {
                 Text("Werkt óók als je slot weg is: de aanvraag wordt bij LINKA klaargezet en het slot pikt hem op zodra het zich meldt. Bij diefstal beweegt de fiets, en beweging maakt het slot wakker — meestal binnen enkele minuten. Je krijgt een bevestigingsmail van LINKA zodra het actief is; daarna verschijnen de posities hieronder. Blijft aan tot je stopt. Verbruikt data van je dataplan.")
             }
 
             Section("Status") {
-                row("Tracking", armed ? "aangevraagd/aan sinds \(started.map { DateUtils.timeHM($0) } ?? "–")" : "uit")
+                row("Tracking", armed ? "aangevraagd/aan sinds \(started.map { sinceText($0) } ?? "–")" : "uit")
                 row("Posities ontvangen", "\(points.count)")
                 row("Laatste update", lastUpdate.map { DateUtils.timeHM($0) } ?? "–")
                 if let last = points.last {
@@ -110,11 +112,23 @@ struct TrackingTestView: View {
     }
 
     private static func armedKey(_ s: String) -> String { "recoveryArmed_\(s)" }
+    private static func startedKey(_ s: String) -> String { "recoveryStarted_\(s)" }
+
+    /// Time only for today, otherwise date + time.
+    private func sinceText(_ d: Date) -> String {
+        Calendar.current.isDateInToday(d) ? DateUtils.timeHM(d) : DateUtils.absolute(d)
+    }
 
     /// Reflect what the user themselves started (reliable), not a guessed server state.
     private func restore() {
         if UserDefaults.standard.bool(forKey: Self.armedKey(serial)) {
-            armed = true; started = started ?? Date(); startPolling()
+            armed = true
+            if started == nil {
+                // The real start time — not "now", which made it look freshly started.
+                let t = UserDefaults.standard.double(forKey: Self.startedKey(serial))
+                started = t > 0 ? Date(timeIntervalSince1970: t) : nil
+            }
+            startPolling()
         }
     }
 
@@ -150,6 +164,7 @@ struct TrackingTestView: View {
                 try await api.setRecoveryMode(serial: serial, enabled: true, auth: auth)
                 armed = true; started = Date(); points = []
                 UserDefaults.standard.set(true, forKey: Self.armedKey(serial))
+                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.startedKey(serial))
                 status = ble.ready ? "recovery aangezet" : "aangevraagd — wacht tot het slot zich meldt"
                 startPolling()
             } catch {
@@ -184,13 +199,33 @@ struct TrackingTestView: View {
     }
 
     private func stop() {
-        loop?.cancel(); loop = nil
-        armed = false
-        UserDefaults.standard.set(false, forKey: Self.armedKey(serial))
+        stopping = true
         let auth = session.identity()
         Task {
-            do { try await api.setRecoveryMode(serial: serial, enabled: false, auth: auth); status = "recovery uitgezet" }
-            catch { status = "uitzetten mislukt: \((error as? LocalizedError)?.errorDescription ?? "\(error)")" }
+            var off = false
+            do {
+                try await api.setRecoveryMode(serial: serial, enabled: false, auth: auth)
+                off = true
+                status = "recovery uitgezet"
+            } catch {
+                let raw = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                let l = raw.lowercased()
+                if l.contains("not currently") || l.contains("not active") || l.contains("no theft") {
+                    // The server has no active session → it is off already.
+                    off = true
+                    status = "recovery stond niet (meer) aan"
+                } else {
+                    // Don't show "uit" while the server (and the data meter) keeps running.
+                    status = "uitzetten mislukt — tracking staat nog aan. Probeer opnieuw. (\(String(raw.prefix(100))))"
+                }
+            }
+            if off {
+                loop?.cancel(); loop = nil
+                armed = false; started = nil
+                UserDefaults.standard.set(false, forKey: Self.armedKey(serial))
+                UserDefaults.standard.removeObject(forKey: Self.startedKey(serial))
+            }
+            stopping = false
         }
     }
 }

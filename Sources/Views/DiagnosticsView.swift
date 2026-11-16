@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Runs a battery of candidate endpoints against the live API with the user's
 /// token and shows the raw responses, so we can see exactly what works.
@@ -34,20 +35,33 @@ struct DiagnosticsView: View {
                 } footer: {
                     Text("⚠︎ Roept activate_sim_consumer aan. Dit kán de SIM activeren / de dataklok starten. Alleen gebruiken als je de status écht wilt opvragen.")
                 }
-                ForEach(results) { r in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(r.label).font(.subheadline.bold())
-                        Text(r.line).font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
+                if busy && results.isEmpty {
+                    Section { HStack { ProgressView(); Text("Endpoints testen…").foregroundStyle(.secondary) } }
+                }
+                if !results.isEmpty {
+                    Section {
+                        Button {
+                            UIPasteboard.general.string = results.map { "\($0.label)\n\($0.line)" }.joined(separator: "\n\n")
+                            Haptic.tap(.light)
+                        } label: { Label("Kopieer resultaten", systemImage: "doc.on.doc") }
+                        ForEach(results) { r in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(r.label).font(.subheadline.bold())
+                                Text(r.line).font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    } header: { Text("Resultaten") } footer: {
+                        Text("De antwoorden kunnen je toegangssleutels bevatten — deel ze niet openbaar.")
                     }
-                    .padding(.vertical, 2)
                 }
             }
             .navigationTitle("API-diagnose")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Sluit") { dismiss() }
+                    Button("Gereed") { dismiss() }
                 }
             }
             .alert("SIM-status opvragen?", isPresented: $simConfirm) {

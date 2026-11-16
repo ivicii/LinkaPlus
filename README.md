@@ -6,16 +6,26 @@ LINKA-cloud (`https://app3.linkalock.com`) via je eigen account.
 
 > Created by Ivo Rooijackers (IvoRoo)
 
-## Wat zit erin (Fase 1)
+## Wat zit erin
 
+**Cloud (Fase 1)**
 - Inloggen met je bestaande LINKA-account (e-mail + logincode, net als de echte app).
-- Overzicht van je sloten met vergrendeld/ontgrendeld-status.
-- **Slotlocatie op een kaart** + knop "Open in Kaarten" voor een routebeschrijving.
-- Batterijpercentage en activiteitenhistorie per slot.
-- Veilige opslag van je token in de iOS Keychain.
+- Overzicht van je sloten met status (live via Bluetooth, anders de laatst bekende cloudstatus).
+- **Slotlocatie op een kaart**, route ernaartoe en een tracking-/recovery-route.
+- Dataplan-status en verlengen, delen & toegang, hernoemen, eigendom overdragen.
+- Offline: slotlijst en sleutel worden bewaard, zodat Bluetooth blijft werken zonder cloud.
 
-Bluetooth openen/sluiten (Fase 2) zit er nog **niet** in — de CoreBluetooth-basis
-(`Sources/BLEManager.swift`) staat al klaar met `TODO`-haken.
+**Bluetooth (Fase 2)**
+- Openen en sluiten, sirene, "zoek slot" op signaalsterkte.
+- Live batterij, sensoren en statusmeldingen (alarm, foute PAC, batterij laag) met notificaties.
+- Slotinstellingen (beveiliging, gedrag, gevoeligheid) en een nieuw slot koppelen.
+- Automatisch opnieuw verbinden, ook op de achtergrond.
+
+**Snel bedienen**
+- Widgets (openen / sluiten), Siri-/Opdrachten-acties en de Actieknop.
+- Een verzoek via widget of opdracht vervalt na 45 seconden als het slot niet bereikbaar is —
+  het slot gaat dus nooit "later vanzelf" open.
+- Onthoudt waar je fiets geparkeerd staat (telefoonlocatie op het moment van sluiten).
 
 ---
 
@@ -34,6 +44,7 @@ Je hebt **geen Mac** nodig. GitHub bouwt de app voor je in de cloud; daarna zet 
 
 1. Ga in je repo naar het tabblad **Actions**.
 2. Kies de workflow **"Build unsigned IPA"** → **Run workflow** (of hij start vanzelf bij een push naar `main`).
+   Bij een pull request wordt de app ook gebouwd (als controle), maar `dist/` wordt dan niet bijgewerkt.
 3. Wacht ~3–5 min. Open de voltooide run en download onderaan het artifact
    **`LinkaPlus-unsigned-ipa`**. Pak de zip uit → je hebt `LinkaPlus.ipa`.
 
@@ -67,12 +78,18 @@ project.yml                 XcodeGen-projectdefinitie (plist-keys, bundle-id, sc
 .github/workflows/build.yml GitHub Actions: bouwt de unsigned IPA
 Sources/
   LinkaPlusApp.swift        App-entry + routing login ↔ sloten
+  AppRouter.swift           Deep links / widgets / intents → "open of sluit nu"
   Models.swift              API-datamodellen (Lock, LockActivity, login)
   APIClient.swift           Alle LINKA-cloudcalls (async/await)
   SessionStore.swift        Auth-state + device-identiteit
   Keychain.swift            Veilige tokenopslag
-  BLEManager.swift          CoreBluetooth-basis (Fase 2)
-  Views/                    Login, slotlijst, slotdetail (kaart/batterij/activiteiten)
+  BLEController.swift       Bluetooth-bediening: verbinden, commando's, live status
+  LinkaCrypto.swift         Versleuteling van de BLE-commando's
+  PairingController.swift   Nieuw slot koppelen
+  BLEManager.swift          GATT-diagnose
+  Theme.swift               Kleuren, kaarten, haptiek
+  Views/                    Login, slotlijst, slotdetail, instellingen, statistieken, …
+  Widget/                   Widgets voor begin- en vergrendelscherm
 ```
 
 ## Opmerkingen

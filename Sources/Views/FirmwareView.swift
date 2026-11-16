@@ -26,10 +26,10 @@ struct FirmwareView: View {
                         if c > 0 {
                             Label("Jouw slot (\(cur)) is nieuwer dan het app-kanaal (\(avail))",
                                   systemImage: "checkmark.seal.fill")
-                                .foregroundStyle(.green).font(.callout)
+                                .foregroundStyle(Theme.success).font(.callout)
                         } else if c == 0 {
                             Label("Up-to-date", systemImage: "checkmark.seal.fill")
-                                .foregroundStyle(.green).font(.callout)
+                                .foregroundStyle(Theme.success).font(.callout)
                         } else {
                             Label("Update beschikbaar via app: \(avail)", systemImage: "arrow.up.circle.fill")
                                 .foregroundStyle(Theme.accent).font(.callout)
@@ -52,7 +52,7 @@ struct FirmwareView: View {
                         if let url = info.leo2_firmware_url, !url.isEmpty {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Download-URL").font(.caption).foregroundStyle(.secondary)
-                                Text(url).font(.caption2).textSelection(.enabled).foregroundStyle(.blue)
+                                Text(url).font(.caption2).textSelection(.enabled).foregroundStyle(Theme.accent)
                             }
                             downloadControls(url: url, version: info.leo2_firmware_version)
                         } else {
@@ -74,7 +74,7 @@ struct FirmwareView: View {
             }
             .navigationTitle("Firmware")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Sluit") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Gereed") { dismiss() } } }
             .task { await load() }
         }
     }
@@ -97,7 +97,7 @@ struct FirmwareView: View {
             .disabled(downloading)
         }
         if let downloadError {
-            Text(downloadError).font(.caption).foregroundStyle(.red)
+            Text(downloadError).font(.caption).foregroundStyle(Theme.danger)
         }
     }
 
@@ -127,7 +127,7 @@ struct FirmwareView: View {
         do {
             info = try await api.consumerAppVersion(auth: session.identity())
         } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         loading = false
     }
@@ -140,7 +140,7 @@ struct FirmwareView: View {
         do {
             downloadedURL = try await api.downloadFile(from: url, suggestedName: fileName)
         } catch {
-            downloadError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            downloadError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         downloading = false
     }

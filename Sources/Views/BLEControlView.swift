@@ -25,7 +25,7 @@ struct BLEControlView: View {
                         Text(ble.lastEvent).font(.system(.caption, design: .monospaced))
                     }
                     if let w = ble.winner {
-                        Label("Werkt: \(w)", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                        Label("Werkt: \(w)", systemImage: "checkmark.seal.fill").foregroundStyle(Theme.success)
                     }
                     HStack { Text("Context teller"); Spacer(); Text(ble.ctxCounter.map(String.init) ?? "–").foregroundStyle(.secondary) }
                     if !keyLoaded {
@@ -35,7 +35,7 @@ struct BLEControlView: View {
                     } else {
                         Button { ble.start() } label: { Label("(Her)verbinden", systemImage: "arrow.clockwise") }
                     }
-                    if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
+                    if let loadError { Text(loadError).font(.caption).foregroundStyle(Theme.danger) }
                 } footer: {
                     Text("Ga vlak bij je slot staan en beweeg het even zodat het adverteert.")
                 }
@@ -58,14 +58,14 @@ struct BLEControlView: View {
                         }
                     } else {
                         Button { ble.autoTest() } label: {
-                            Label("Auto-test: probeer alle combinaties", systemImage: "wand.and.stars")
+                            Label("Auto-test: zoek de werkende sleutel", systemImage: "wand.and.stars")
                         }
                         .disabled(!ble.ready)
                     }
                 } header: {
                     Text("Automatisch testen")
                 } footer: {
-                    Text("Stuurt achter elkaar een unlock met elke sleutel × kanaal × teller-offset (±2 sec elk). Kijk wanneer je slot reageert en deel daarna de log.")
+                    Text("Probeert maximaal 4 sleutels met een onschuldige status-ping (het slot gaat hierbij niet open) en stopt na 2 weigeringen, zodat het slot niet in lockout gaat. Deel daarna de log.")
                 }
 
                 Section {
@@ -95,9 +95,15 @@ struct BLEControlView: View {
             }
             .navigationTitle("Bediening (BLE)")
             .navigationBarTitleDisplayMode(.inline)
+            // The test knobs live on the shared controller: put them back, or every
+            // later command (settings, widgets) would use this channel/offset too.
+            .onDisappear {
+                ble.channel = 0; ble.counterOffset = 0
+                if ble.testing { ble.stopTest() }
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Sluit") { dismiss() }
+                    Button("Gereed") { dismiss() }
                 }
             }
         }
@@ -105,14 +111,21 @@ struct BLEControlView: View {
 
     private func loadKeyAndStart() async {
         loadError = nil
+        var keys: AccessKeys?
         do {
-            let status = try await api.checkKeyStatus(serial: serial, auth: session.identity())
-            guard let keys = status.key, keys.commandKey != nil else { loadError = "Geen bruikbare access-key gevonden."; return }
-            ble.configure(keys: keys, serial: serial, nameHint: lockName)
-            keyLoaded = true
-            ble.start()
+            keys = try await api.checkKeyStatus(serial: serial, auth: session.identity()).key
+            if let k = keys, k.commandKey != nil { LockCache.saveKeys(k, serial: serial) }
         } catch {
-            loadError = (error as? LocalizedError)?.errorDescription ?? "Sleutel laden mislukt: \(error)"
+            // Cloud unreachable → fall back to the key cached on this phone.
+            keys = LockCache.loadKeys(serial: serial)
+            if keys == nil {
+                loadError = (error as? LocalizedError)?.errorDescription ?? "Sleutel laden mislukt: \(error.localizedDescription)"
+                return
+            }
         }
+        guard let k = keys, k.commandKey != nil else { loadError = "Geen bruikbare access-key gevonden."; return }
+        ble.configure(keys: k, serial: serial, nameHint: lockName)
+        keyLoaded = true
+        ble.start()
     }
 }

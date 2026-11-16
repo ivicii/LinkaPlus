@@ -49,14 +49,22 @@ enum LockPrefs {
 
     /// Store the PAC the user set (the lock does not return it over BLE, so we
     /// remember what was written, exactly like the official app does).
+    /// Kept in the Keychain: the PAC opens the lock without a phone, so it does
+    /// not belong in a plain-text preferences file (which also ends up in backups).
     static func setPAC(_ code: Int, serial: String?) {
         guard let serial else { return }
-        UserDefaults.standard.set(code, forKey: "pac_\(serial)")
+        Keychain.set(String(code), for: "pac_\(serial)")
+        UserDefaults.standard.removeObject(forKey: "pac_\(serial)")
     }
     static func pac(serial: String?) -> Int? {
         guard let serial else { return nil }
-        let v = UserDefaults.standard.integer(forKey: "pac_\(serial)")
-        return v > 0 ? v : nil
+        if let s = Keychain.get("pac_\(serial)"), let v = Int(s), v > 0 { return v }
+        // One-time move of a value stored by an older version.
+        let old = UserDefaults.standard.integer(forKey: "pac_\(serial)")
+        guard old > 0 else { return nil }
+        Keychain.set(String(old), for: "pac_\(serial)")
+        UserDefaults.standard.removeObject(forKey: "pac_\(serial)")
+        return old
     }
 
     /// Remember the last value written for a numeric setting (the lock doesn't

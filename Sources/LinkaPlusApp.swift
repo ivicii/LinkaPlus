@@ -9,6 +9,7 @@ struct LinkaPlusApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .tint(Theme.accent)
                 .environmentObject(session)
                 .environmentObject(router)
                 .onOpenURL { url in

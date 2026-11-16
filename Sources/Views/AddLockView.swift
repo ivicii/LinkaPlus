@@ -28,7 +28,7 @@ struct AddLockView: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(f.name).font(.headline)
-                                        Text(f.mac ?? "MAC onbekend").font(.caption.monospaced()).foregroundStyle(.secondary)
+                                        Text(f.mac ?? "Serienummer onbekend").font(.caption.monospaced()).foregroundStyle(.secondary)
                                         if mine { Text("Staat al in je lijst").font(.caption2).foregroundStyle(Theme.success) }
                                     }
                                     Spacer()
@@ -77,7 +77,7 @@ struct AddLockView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Sluit") { pc.stopScan(); if pc.finished { onDone() }; dismiss() }
+                    Button("Gereed") { pc.stopScan(); if pc.finished { onDone() }; dismiss() }
                         .disabled(pc.busy)
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -87,6 +87,7 @@ struct AddLockView: View {
                 }
             }
             .interactiveDismissDisabled(pc.busy)
+            .onDisappear { if pc.scanning { pc.stopScan() } }
             .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { pc.startScan() } }
             .alert("Dit slot koppelen?", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
                 Button("Annuleer", role: .cancel) { confirm = nil }

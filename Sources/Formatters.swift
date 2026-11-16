@@ -28,7 +28,7 @@ enum DateUtils {
 
     /// Try ISO first, then epoch.
     static func parseAny(_ s: String?) -> Date? {
-        parseISO(s) ?? parseEpoch(s)
+        parseEpoch(s) ?? parseISO(s)   // epoch check is cheap; ISO parsing is not
     }
 
     private static let display: DateFormatter = {
@@ -61,4 +61,13 @@ enum DateUtils {
 
     /// "22:35"
     static func timeHM(_ d: Date) -> String { hmFmt.string(from: d) }
+}
+
+/// Distance in Dutch notation: "85 m", "1,4 km".
+enum DistanceText {
+    private static let nl = Locale(identifier: "nl_NL")
+    static func format(meters: Double) -> String {
+        if meters < 1000 { return String(format: "%.0f m", locale: nl, meters) }
+        return String(format: "%.1f km", locale: nl, meters / 1000)
+    }
 }

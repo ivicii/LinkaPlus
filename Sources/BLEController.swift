@@ -9,6 +9,10 @@ final class BLEController: NSObject, ObservableObject {
 
     @Published private(set) var state = "idle"
     @Published private(set) var ready = false
+    /// Serial of the lock this controller is configured for (nil = none yet).
+    @Published private(set) var currentSerial: String?
+    /// Bluetooth is switched off or the app has no Bluetooth permission.
+    @Published private(set) var bluetoothOff = false
     @Published private(set) var ctxEncVer: Int?
     @Published private(set) var ctxCounter: UInt32?
     @Published private(set) var liveLocked: Bool?
@@ -39,6 +43,7 @@ final class BLEController: NSObject, ObservableObject {
     @Published private(set) var readFrames: [String] = []
     @Published private(set) var lastReadLabel: String?
     private var awaitingRead: String?
+    private var readQueue: [Int] = []
     private var pendingReadIdx: Int?
     private var replyReceived = false
 
@@ -303,6 +308,11 @@ final class BLEController: NSObject, ObservableObject {
     private var write0016: CBCharacteristic?
 
     func configure(keys: AccessKeys, serial: String, nameHint: String?) {
+        // A different lock than the one we were driving: drop the old link and its
+        // live state, so nothing from lock A is shown for (or sent to) lock B.
+        let previous = currentSerial ?? UserDefaults.standard.string(forKey: Self.lastSerialKey)
+        if let previous, previous.caseInsensitiveCompare(serial) != .orderedSame { resetForLockSwitch() }
+        currentSerial = serial
         UserDefaults.standard.set(serial, forKey: Self.lastSerialKey)
         UserDefaults.standard.set(nameHint, forKey: Self.lastNameKey)
         allKeys = keys
@@ -312,6 +322,36 @@ final class BLEController: NSObject, ObservableObject {
             subkey = LinkaCrypto.hex(ck.hex)
             priv = ck.admin ? .admin : .user
         }
+    }
+
+    /// Let go of the lock we are driving unless it is `serial`. Called when a
+    /// lock's screen opens, so that screen can never operate another lock — also
+    /// not when no key could be loaded for it.
+    func release(unless serial: String) {
+        guard let current = currentSerial, current.caseInsensitiveCompare(serial) != .orderedSame else { return }
+        resetForLockSwitch()
+        currentSerial = nil
+    }
+
+    private func resetForLockSwitch() {
+        add("Ander slot gekozen — verbinding en live status gereset.")
+        central.stopScan()
+        let old = peripheral
+        peripheral = nil; write0002 = nil; write0016 = nil
+        if let old { central.cancelPeripheralConnection(old) }
+        UserDefaults.standard.removeObject(forKey: Self.lastPeripheralKey)
+        ready = false; state = "idle"; rssi = nil
+        ctxCounter = nil; ctxEncVer = nil; lastUsedCounter = nil; didInitialStatusPing = false
+        liveLocked = nil; motion = nil; motionStart = nil; lockStateText = nil; lockReason = nil
+        batteryLevelBLE = nil; batteryVoltageBLE = nil; isChargingBLE = false
+        statusFlags = []; prevFlagSet = []
+        commandResult = nil; lastEvent = "–"; winner = nil
+        settingValues = [:]; settingValues2 = [:]
+        netOperator = nil; netCSQ = nil; fwRevision = nil
+        infoUptime = nil; infoRSSIpkt = nil; accelG = nil; infoExtra = nil
+        infoTempC = nil; infoRaw = nil; infoAt = nil
+        awayLatched = false; nearCount = 0
+        subkey = []; mac = []; allKeys = nil
     }
 
     struct KeyVariant { let name: String; let hex: String; let priv: LinkaCrypto.Priv }
@@ -526,9 +566,9 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     /// Quick Lock as the official app does it (LockController.doSetAutolock): idx 102 = 20 / 0.
-    func setQuickLock(_ on: Bool)   { put(102, on ? 20 : 0, on ? "Quick-lock aan" : "Quick-lock uit") }
+    func setQuickLock(_ on: Bool)   { put(102, on ? 20 : 0, on ? "Autolock aan" : "Autolock uit") }
     /// VLSO_SETTING_ALLOW_UNCONN_LOCK (idx 55): allow locking without a connected phone.
-    func setAllowUnconnLock(_ on: Bool) { put(55, on ? 1 : 0, on ? "Sluiten zonder verbinding aan" : "Sluiten zonder verbinding uit") }
+    func setAllowUnconnLock(_ on: Bool) { put(55, on ? 1 : 0, on ? "Quick-lock aan" : "Quick-lock uit") }
     /// Movement notification (official doSetMovementNotification): idx 106 = 5 / 0.
     func setMovementAlarm(_ on: Bool) { put(106, on ? 5 : 0, on ? "Bewegingsmelding aan" : "Bewegingsmelding uit") }
     func setAudio(_ on: Bool)       { put(12, on ? 3 : 0, on ? "Geluid aan" : "Geluid uit") }
@@ -596,11 +636,15 @@ final class BLEController: NSObject, ObservableObject {
     /// Reads settings one by one (each command needs the fresh counter the lock
     /// hands out after the previous one). Results land in `settingValues`.
     func readSettings(_ idxs: [Int]) {
-        guard ready, !reading else { return }
+        guard ready else { return }
+        // Queue instead of dropping: a read requested while another one runs (page
+        // opened during a read-back, or the read-back after a write) still happens.
+        for i in idxs where !readQueue.contains(i) { readQueue.append(i) }
+        guard !reading else { return }
         reading = true
         Task {
-            for idx in idxs {
-                guard ready else { break }
+            while ready, !readQueue.isEmpty {
+                let idx = readQueue.removeFirst()
                 pendingReadIdx = idx
                 replyReceived = false
                 awaitingRead = "Param \(idx)"
@@ -611,6 +655,7 @@ final class BLEController: NSObject, ObservableObject {
                 awaitingRead = nil
                 pendingReadIdx = nil
             }
+            readQueue = []
             reading = false
         }
     }
@@ -652,7 +697,11 @@ final class BLEController: NSObject, ObservableObject {
     private func sendPayload(_ payload: [UInt8], name: String, expectActuation: Bool = false, quiet: Bool = false, retry: Int = 0, onSuccess: (() -> Void)? = nil) {
         let ch = (channel == 1) ? write0016 : write0002
         guard let ch = ch else { add("Geen write-characteristic."); return }
-        guard let c = ctxCounter else { add("Nog geen context-teller (wacht op 0x12-frame)."); return }
+        guard let c = ctxCounter else {
+            add("Nog geen context-teller (wacht op 0x12-frame).")
+            if !quiet { commandResult = .timeout }   // tell the user instead of doing nothing
+            return
+        }
         let useCounter = UInt32(truncatingIfNeeded: Int(c) + counterOffset)
         // Anti-replay: the counter is the AES IV. Reusing it makes the firmware
         // reject the command as "Bad enc" and increments its bad-enc counter, so
@@ -697,6 +746,7 @@ final class BLEController: NSObject, ObservableObject {
 extension BLEController: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         Task { @MainActor in
+            bluetoothOff = (central.state == .poweredOff || central.state == .unauthorized)
             if central.state == .poweredOn {
                 // Bluetooth came back on (or relaunch) — resume unless stopped on purpose.
                 if let p = peripheral, p.state == .connected, !ready {
@@ -707,14 +757,26 @@ extension BLEController: CBCentralManagerDelegate {
                 }
             } else {
                 add("BT status \(central.state.rawValue)")
+                // Bluetooth went away: iOS drops the link without a disconnect callback.
+                if bluetoothOff {
+                    ready = false; rssi = nil
+                    ctxCounter = nil; ctxEncVer = nil; lastUsedCounter = nil
+                    didInitialStatusPing = false; motion = nil
+                    if state != "gestopt" { state = "verbroken" }
+                }
             }
         }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                                     advertisementData: [String: Any], rssi RSSI: NSNumber) {
         let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name
+        let mfg = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
         Task { @MainActor in
             guard let name = name else { return }
+            // All locks advertise the same name. When the advert carries the lock's
+            // MAC, only connect to the lock we are configured for.
+            if let advMac = PairingController.macFromAdvert(mfg), let serial = currentSerial,
+               advMac.caseInsensitiveCompare(serial) != .orderedSame { return }
             let hint = nameHint?.lowercased()
             let isLock = name.lowercased().contains("linka") || name.lowercased().contains("leo")
             let match = hint.map { name.lowercased().contains($0) } ?? false
@@ -751,10 +813,17 @@ extension BLEController: CBCentralManagerDelegate {
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
+            // A lock we already let go of (switched to another lock) — ignore.
+            guard let current = self.peripheral, current.identifier == peripheral.identifier else { return }
             ready = false; state = "verbroken"; add("Verbinding verbroken.")
             didInitialStatusPing = false
             lastUsedCounter = nil
-            if proximityUnlockEnabled, liveLocked == true { awayLatched = true; nearCount = 0 }
+            // "Walked away" only when the signal was already weak. A drop at close
+            // range (lock rebooted or went to sleep, link glitch, manual stop) must
+            // not arm an automatic unlock on reconnect.
+            if proximityUnlockEnabled, liveLocked == true, !intentionalStop, let last = rssi, last < -85 {
+                awayLatched = true; nearCount = 0
+            }
             ctxCounter = nil; ctxEncVer = nil
             // Auto-reconnect unless stopped on purpose: a pending connect that iOS
             // completes as soon as the lock is back in range — also in the background.
@@ -860,7 +929,8 @@ extension BLEController: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
         Task { @MainActor in
             guard error == nil else { return }
-            rssi = RSSI.intValue
+            // Only publish a change — this fires every 0.7 s and redraws all observers.
+            if rssi != RSSI.intValue { rssi = RSSI.intValue }
             handleProximity(RSSI.intValue)
         }
     }
