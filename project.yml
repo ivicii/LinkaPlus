@@ -91,7 +91,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ivoroo.linkaplus.watchkitapp
-        PRODUCT_NAME: LinkaPlus
+        PRODUCT_NAME: LinkaPlusWatch
         TARGETED_DEVICE_FAMILY: "4"
     info:
       path: Sources/Watch/Info.plist
