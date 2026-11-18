@@ -450,7 +450,30 @@ final class BLEController: NSObject, ObservableObject {
     private static let restoreID = "com.ivoroo.linkaplus.central"
     private static let lastSerialKey = "ble_lastSerial"
     private static let lastNameKey = "ble_lastName"
-    private static let lastPeripheralKey = "ble_lastPeripheral"
+    private static let lastPeripheralKey = "ble_lastPeripheral"   // legacy single key; migrated per serial
+    private static func peripheralKey(_ serial: String) -> String { "ble_lastPeripheral_\(serial.uppercased())" }
+    private static func ownerKey(_ uuid: String) -> String { "ble_pOwner_\(uuid)" }
+
+    /// The CBPeripheral UUID we last connected to for this serial. iOS keeps the
+    /// same UUID per device per install, so this is the reliable way to recognise
+    /// the right lock on iOS (unlike Android, CoreBluetooth never exposes the MAC).
+    private func storedPeripheralUUID(for serial: String) -> String? {
+        let d = UserDefaults.standard
+        if let s = d.string(forKey: Self.peripheralKey(serial)) { return s }
+        // Migrate the old single key the first time, if it was this serial's lock.
+        if d.string(forKey: Self.lastSerialKey)?.caseInsensitiveCompare(serial) == .orderedSame,
+           let legacy = d.string(forKey: Self.lastPeripheralKey) {
+            d.set(legacy, forKey: Self.peripheralKey(serial))
+            d.set(serial, forKey: Self.ownerKey(legacy))
+            return legacy
+        }
+        return nil
+    }
+
+    private func rememberPeripheral(_ uuid: String, for serial: String) {
+        UserDefaults.standard.set(uuid, forKey: Self.peripheralKey(serial))
+        UserDefaults.standard.set(serial, forKey: Self.ownerKey(uuid))
+    }
 
     init(restoring: Bool = false) {
         super.init()
@@ -504,6 +527,34 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     private var intentionalStop = false
+    /// Last time any data moved over the link (RSSI read or incoming frame).
+    /// The watchdog below reconnects when this goes quiet on a "connected" link.
+    private var lastActivity = Date()
+    private var stallWatching = false
+
+    private func noteActivity() { lastActivity = Date() }
+
+    /// Mirrors the official app, which force-reconnects when the lock's packet
+    /// count stops advancing. iOS does not always deliver a disconnect callback
+    /// when a link silently dies; RSSI is polled every 0.7 s, so 15 s of total
+    /// silence means the link is dead even on an otherwise idle lock.
+    private func startStallWatchdog() {
+        guard !stallWatching else { return }
+        stallWatching = true
+        lastActivity = Date()
+        Task {
+            while ready, !intentionalStop, let p = peripheral {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard ready, !intentionalStop, peripheral?.identifier == p.identifier else { break }
+                if Date().timeIntervalSince(lastActivity) > 15 {
+                    add("Verbinding reageert niet meer — opnieuw verbinden.")
+                    central.cancelPeripheralConnection(p)   // → didDisconnect → auto-reconnect
+                    break
+                }
+            }
+            stallWatching = false
+        }
+    }
 
     func start() {
         guard subkey.count == 16, mac.count == 6 else {
@@ -514,7 +565,7 @@ final class BLEController: NSObject, ObservableObject {
         guard !ready, state != "scannen", state != "verbinden", state != "services" else { return }
         intentionalStop = false
         // Known lock → pending connect (works in the background too); else scan.
-        if let s = UserDefaults.standard.string(forKey: Self.lastPeripheralKey), let id = UUID(uuidString: s),
+        if let serial = currentSerial, let s = storedPeripheralUUID(for: serial), let id = UUID(uuidString: s),
            let p = central.retrievePeripherals(withIdentifiers: [id]).first {
             ready = false
             add("Wachten op slot (automatisch verbinden)…")
@@ -552,6 +603,25 @@ final class BLEController: NSObject, ObservableObject {
         let txPower = -59.0   // typical RSSI at 1 m
         let n = 2.5           // path-loss exponent
         return pow(10.0, (txPower - Double(r)) / (10.0 * n))
+    }
+
+    /// Live lock state + battery straight from the 0xC3 advertisement — the same
+    /// bytes the official app reads before it connects. Display only; the full
+    /// connect confirms it a moment later. Offsets are relative to the 0xC3
+    /// marker: +1 = battery %, +2 = lock-state byte (3/7 = dicht, 4/8 = open).
+    private func applyAdvertStatus(_ adv: [String: Any]) {
+        guard let d = (adv[CBAdvertisementDataManufacturerDataKey] as? Data).map({ [UInt8]($0) }) else { return }
+        for start in 0..<min(3, d.count) where d[start] == 0xC3 {
+            guard d.count > start + 2 else { return }
+            let batt = Int(d[start + 1])
+            if batt > 0, batt <= 100 { batteryLevelBLE = batt }
+            switch d[start + 2] {
+            case 3, 7: liveLocked = true
+            case 4, 8: liveLocked = false
+            default: break   // transitional/unknown → leave as is
+            }
+            return
+        }
     }
 
     func unlock() { sendPayload([0, 0], name: "Openen", expectActuation: true) { self.liveLocked = false } }
@@ -776,10 +846,21 @@ extension BLEController: CBCentralManagerDelegate {
             // order than the serial, so filtering on it skipped every lock and the
             // app connected to nothing. A single lock always connects; the right-lock
             // guarantee for multiple locks is handled by configure()/release(unless:).
+            // The right lock on iOS: match the peripheral UUID we pinned at the
+            // first successful connect. Before that we fall back to the name.
+            let uuid = peripheral.identifier.uuidString
+            if let owner = UserDefaults.standard.string(forKey: Self.ownerKey(uuid)),
+               let serial = currentSerial, owner.caseInsensitiveCompare(serial) != .orderedSame {
+                return   // this peripheral belongs to a different lock of ours
+            }
+            if let serial = currentSerial, let known = storedPeripheralUUID(for: serial), known != uuid {
+                return   // we've pinned this lock already — only that exact peripheral
+            }
             let hint = nameHint?.lowercased()
             let isLock = name.lowercased().contains("linka") || name.lowercased().contains("leo")
             let match = hint.map { name.lowercased().contains($0) } ?? false
             if (match || isLock), state == "scannen" {
+                applyAdvertStatus(advertisementData)   // instant status, like the official app
                 state = "verbinden"
                 self.peripheral = peripheral
                 peripheral.delegate = self
@@ -807,7 +888,7 @@ extension BLEController: CBCentralManagerDelegate {
     }
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         Task { @MainActor in
-            UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: Self.lastPeripheralKey)
+            if let serial = currentSerial { rememberPeripheral(peripheral.identifier.uuidString, for: serial) }
             state = "services"; peripheral.discoverServices([LinkaBLE.service, CBUUID(string: "180A"), CBUUID(string: "180F")]) }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
@@ -865,13 +946,14 @@ extension BLEController: CBPeripheralDelegate {
             ready = (write0002 != nil || write0016 != nil)
             state = ready ? "klaar" : "verbonden (geen write-char)"
             add(ready ? "Klaar. Wacht op context-frame (0x12)…" : "Geen write-characteristic.")
-            if ready { startRSSIPolling() }
+            if ready { startRSSIPolling(); startStallWatchdog() }
         }
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         let data = [UInt8](characteristic.value ?? Data())
         let uuid = characteristic.uuid.uuidString
         Task { @MainActor in
+            noteActivity()
             // Device Information Service — firmware revision string.
             if characteristic.uuid == CBUUID(string: "2A26") {
                 fwRevision = String(bytes: data, encoding: .utf8)?
@@ -928,6 +1010,7 @@ extension BLEController: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
         Task { @MainActor in
             guard error == nil else { return }
+            noteActivity()
             // Only publish a change — this fires every 0.7 s and redraws all observers.
             if rssi != RSSI.intValue { rssi = RSSI.intValue }
             handleProximity(RSSI.intValue)
