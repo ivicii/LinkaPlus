@@ -28,6 +28,12 @@ enum LockCache {
 
 /// Small per-lock UI preferences that should survive app restarts.
 enum LockPrefs {
+    /// Which melody the "Zoek slot" finder plays (0–3). App-wide.
+    static var finderTune: Int {
+        get { UserDefaults.standard.object(forKey: "finderTune") == nil ? 1 : UserDefaults.standard.integer(forKey: "finderTune") }
+        set { UserDefaults.standard.set(newValue, forKey: "finderTune") }
+    }
+
     static func setMovementAlarm(_ on: Bool, serial: String?) {
         guard let serial else { return }
         UserDefaults.standard.set(on, forKey: "movementAlarm_\(serial)")

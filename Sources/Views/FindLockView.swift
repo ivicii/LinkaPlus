@@ -7,6 +7,7 @@ struct FindLockView: View {
     @ObservedObject var ble: BLEController
     let onSiren: () -> Void
     @Environment(\.dismiss) var dismiss
+    @State private var tune = LockPrefs.finderTune
 
     private static let nl = Locale(identifier: "nl_NL")
 
@@ -68,15 +69,48 @@ struct FindLockView: View {
                         }
                         .padding(.horizontal, 32)
 
-                        Button {
-                            Haptic.tap()
-                            if sirenActive { ble.sirenOff() } else { onSiren() }
-                        } label: {
-                            Label(sirenActive ? "Sirene stoppen" : "Sirene laten afgaan",
-                                  systemImage: sirenActive ? "speaker.slash.fill" : "speaker.wave.3.fill")
-                                .frame(maxWidth: .infinity).padding()
-                                .background((sirenActive ? Theme.danger : tint).opacity(0.2))
-                                .clipShape(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous))
+                        VStack(spacing: 10) {
+                            Button {
+                                Haptic.tap()
+                                if ble.ready { ble.playTune(tune) }
+                            } label: {
+                                Label("Laat slot piepen", systemImage: "music.note")
+                                    .frame(maxWidth: .infinity).padding()
+                                    .background(tint.opacity(0.2))
+                                    .clipShape(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous))
+                            }
+                            .disabled(!ble.ready)
+
+                            // The lock has four melodies — tap to try, the choice is remembered.
+                            HStack(spacing: 8) {
+                                Text("Melodie").font(.caption).foregroundStyle(.secondary)
+                                ForEach(0..<4) { n in
+                                    Button {
+                                        tune = n; LockPrefs.finderTune = n
+                                        if ble.ready { ble.playTune(n) }
+                                    } label: {
+                                        Text("\(n + 1)")
+                                            .font(.subheadline.weight(.semibold))
+                                            .frame(width: 34, height: 34)
+                                            .background((tune == n ? tint : Color.secondary).opacity(tune == n ? 0.3 : 0.12))
+                                            .clipShape(Circle())
+                                    }
+                                    .disabled(!ble.ready)
+                                }
+                            }
+
+                            if sirenActive {
+                                Button { ble.sirenOff() } label: {
+                                    Label("Sirene stoppen", systemImage: "speaker.slash.fill")
+                                        .font(.footnote).foregroundStyle(Theme.danger)
+                                }
+                            } else {
+                                Button { Haptic.tap(); onSiren() } label: {
+                                    Label("Toch de sirene", systemImage: "speaker.wave.3.fill")
+                                        .font(.footnote).foregroundStyle(.secondary)
+                                }
+                                .disabled(!ble.ready)
+                            }
                         }
                         .padding(.horizontal, 24)
                         Spacer(minLength: 0)

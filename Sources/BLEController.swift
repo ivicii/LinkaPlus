@@ -692,6 +692,9 @@ final class BLEController: NSObject, ObservableObject {
 
     // MARK: Commands (opcodes from the firmware command map)
     func sirenOn()         { selfSirenUntil = Date().addingTimeInterval(75); sendPayload([14, 60], name: "Sirene") }
+    /// Short melody/beep to locate the lock (opcode 18) — not the theft siren.
+    /// The lock has four tunes: 0–3. Used by the "Zoek slot" finder.
+    func playTune(_ n: Int) { sendPayload([18, UInt8(max(0, min(3, n)))], name: "Melodie \(n)") }
     func sirenOff()        { sendPayload([20, 0], name: "Sirene uit") }
     func reboot()          { sendPayload([31, 0], name: "Herstart") }
     func sleepLock()       { sendPayload([9, 0],  name: "Slaapstand") }
