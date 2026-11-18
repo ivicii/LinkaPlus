@@ -47,10 +47,12 @@ struct BackupView: View {
                     .disabled(!canExport)
             }
 
-            Section("Herstellen") {
+            Section {
                 Button {
                     showImporter = true
                 } label: { Label("Kies back-upbestand", systemImage: "square.and.arrow.down") }
+            } header: {
+                Text("Herstellen")
             } footer: {
                 Text("Na het kiezen van het bestand vraag ik je wachtwoord. Bestaande sloten blijven staan; sleutels uit de back-up worden toegevoegd.")
             }
