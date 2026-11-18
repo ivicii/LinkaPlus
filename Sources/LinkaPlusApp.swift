@@ -10,6 +10,7 @@ struct LinkaPlusApp: App {
         WindowGroup {
             RootView()
                 .tint(Theme.accent)
+                .onAppear { WatchBridge.shared.activate() }
                 .environmentObject(session)
                 .environmentObject(router)
                 .onOpenURL { url in

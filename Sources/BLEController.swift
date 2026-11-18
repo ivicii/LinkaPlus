@@ -151,6 +151,7 @@ final class BLEController: NSObject, ObservableObject {
         guard d.count >= 7, d[0] == 0x14, d[1] == 0x02 else { return }
         let pct = Int(d[6])
         if pct >= 0 && pct <= 100 { batteryLevelBLE = pct; checkLowBattery(pct) }
+        WatchBridge.shared.pushState()
         let mv = Int(d[4]) | (Int(d[5]) << 8)
         let v = Double(mv) / 1000.0
         if v > 1.0 && v < 6.0 { batteryVoltageBLE = v }
