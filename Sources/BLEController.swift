@@ -605,6 +605,25 @@ final class BLEController: NSObject, ObservableObject {
         return pow(10.0, (txPower - Double(r)) / (10.0 * n))
     }
 
+    /// Live lock state + battery straight from the 0xC3 advertisement — the same
+    /// bytes the official app reads before it connects. Display only; the full
+    /// connect confirms it a moment later. Offsets are relative to the 0xC3
+    /// marker: +1 = battery %, +2 = lock-state byte (3/7 = dicht, 4/8 = open).
+    private func applyAdvertStatus(_ adv: [String: Any]) {
+        guard let d = (adv[CBAdvertisementDataManufacturerDataKey] as? Data).map({ [UInt8]($0) }) else { return }
+        for start in 0..<min(3, d.count) where d[start] == 0xC3 {
+            guard d.count > start + 2 else { return }
+            let batt = Int(d[start + 1])
+            if batt > 0, batt <= 100 { batteryLevelBLE = batt }
+            switch d[start + 2] {
+            case 3, 7: liveLocked = true
+            case 4, 8: liveLocked = false
+            default: break   // transitional/unknown → leave as is
+            }
+            return
+        }
+    }
+
     func unlock() { sendPayload([0, 0], name: "Openen", expectActuation: true) { self.liveLocked = false } }
     func lock()   { sendPayload([1, 0], name: "Sluiten", expectActuation: true) { self.liveLocked = true } }
 
@@ -841,6 +860,7 @@ extension BLEController: CBCentralManagerDelegate {
             let isLock = name.lowercased().contains("linka") || name.lowercased().contains("leo")
             let match = hint.map { name.lowercased().contains($0) } ?? false
             if (match || isLock), state == "scannen" {
+                applyAdvertStatus(advertisementData)   // instant status, like the official app
                 state = "verbinden"
                 self.peripheral = peripheral
                 peripheral.delegate = self
