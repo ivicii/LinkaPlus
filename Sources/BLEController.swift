@@ -527,6 +527,34 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     private var intentionalStop = false
+    /// Last time any data moved over the link (RSSI read or incoming frame).
+    /// The watchdog below reconnects when this goes quiet on a "connected" link.
+    private var lastActivity = Date()
+    private var stallWatching = false
+
+    private func noteActivity() { lastActivity = Date() }
+
+    /// Mirrors the official app, which force-reconnects when the lock's packet
+    /// count stops advancing. iOS does not always deliver a disconnect callback
+    /// when a link silently dies; RSSI is polled every 0.7 s, so 15 s of total
+    /// silence means the link is dead even on an otherwise idle lock.
+    private func startStallWatchdog() {
+        guard !stallWatching else { return }
+        stallWatching = true
+        lastActivity = Date()
+        Task {
+            while ready, !intentionalStop, let p = peripheral {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard ready, !intentionalStop, peripheral?.identifier == p.identifier else { break }
+                if Date().timeIntervalSince(lastActivity) > 15 {
+                    add("Verbinding reageert niet meer — opnieuw verbinden.")
+                    central.cancelPeripheralConnection(p)   // → didDisconnect → auto-reconnect
+                    break
+                }
+            }
+            stallWatching = false
+        }
+    }
 
     func start() {
         guard subkey.count == 16, mac.count == 6 else {
@@ -898,13 +926,14 @@ extension BLEController: CBPeripheralDelegate {
             ready = (write0002 != nil || write0016 != nil)
             state = ready ? "klaar" : "verbonden (geen write-char)"
             add(ready ? "Klaar. Wacht op context-frame (0x12)…" : "Geen write-characteristic.")
-            if ready { startRSSIPolling() }
+            if ready { startRSSIPolling(); startStallWatchdog() }
         }
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         let data = [UInt8](characteristic.value ?? Data())
         let uuid = characteristic.uuid.uuidString
         Task { @MainActor in
+            noteActivity()
             // Device Information Service — firmware revision string.
             if characteristic.uuid == CBUUID(string: "2A26") {
                 fwRevision = String(bytes: data, encoding: .utf8)?
@@ -961,6 +990,7 @@ extension BLEController: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
         Task { @MainActor in
             guard error == nil else { return }
+            noteActivity()
             // Only publish a change — this fires every 0.7 s and redraws all observers.
             if rssi != RSSI.intValue { rssi = RSSI.intValue }
             handleProximity(RSSI.intValue)
