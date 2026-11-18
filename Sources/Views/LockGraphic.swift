@@ -1,40 +1,38 @@
 import SwiftUI
 import UIKit
 
-/// Flat 2D drawing of the LINKA ring lock: a horseshoe ring with a shackle that
-/// slides across the bottom gap. Refined, flat look — a soft state-coloured halo,
-/// a faint full-circle track, a subtle gradient on the ring and shackle, and a
-/// small LED. No skeuomorphic 3D; just clean, modern shapes.
+/// Flat 2D drawing of the LINKA ring lock: a calm neutral horseshoe ring with a
+/// state-coloured shackle that slides across the bottom gap, a small centre dot,
+/// and a soft colour bloom behind the shackle (no 3D, no hard halo). The ring
+/// reads well in both light and dark — it stays charcoal, like the real lock body
+/// — and the colour carries the state.
 struct LockGraphic: View {
     /// true = locked (shackle closed), false = open (shackle retracted).
     let locked: Bool
     /// State colour (green locked, orange open, blue/grey unknown).
     let color: Color
     var size: CGFloat = 200
-    /// Motor running → shackle/LED pulse (700 ms, like the official app).
+    /// Motor running → shackle/dot pulse (700 ms, like the official app).
     var moving: Bool = false
     /// Shackle travel time — the measured motor time, so it closes with the lock.
     var duration: Double = 1.0
     @State private var pulse = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    // Calm neutral ring — dark charcoal on light, soft graphite on dark. Never a
+    // stark white, so it reads like the real black lock body in both themes.
     private static let ringBase = Color(UIColor { t in
-        t.userInterfaceStyle == .dark ? UIColor(white: 0.92, alpha: 1) : UIColor(white: 0.16, alpha: 1)
+        t.userInterfaceStyle == .dark ? UIColor(red: 0.290, green: 0.290, blue: 0.322, alpha: 1)
+                                      : UIColor(red: 0.149, green: 0.149, blue: 0.169, alpha: 1)
     })
     private static let ringTop = Color(UIColor { t in
-        t.userInterfaceStyle == .dark ? UIColor(white: 0.74, alpha: 1) : UIColor(white: 0.34, alpha: 1)
-    })
-    private static let trackColor = Color(UIColor { t in
-        UIColor(white: t.userInterfaceStyle == .dark ? 1 : 0, alpha: 0.08)
+        t.userInterfaceStyle == .dark ? UIColor(red: 0.354, green: 0.354, blue: 0.392, alpha: 1)
+                                      : UIColor(red: 0.182, green: 0.182, blue: 0.206, alpha: 1)
     })
 
     private var ringGradient: LinearGradient {
         LinearGradient(colors: [Self.ringTop, Self.ringBase],
                        startPoint: .top, endPoint: .bottom)
-    }
-    private var shackleGradient: LinearGradient {
-        LinearGradient(colors: [color.opacity(0.95), color.opacity(0.72)],
-                       startPoint: .leading, endPoint: .trailing)
     }
 
     var body: some View {
@@ -44,40 +42,36 @@ struct LockGraphic: View {
         let deg = 35.0 * .pi / 180
         let ex = r * sin(deg)
         let ey = r * cos(deg)
-        let barH = t * 0.74
+        let barH = t * 0.82
         let barW = locked ? ex * 2 + barH : barH
 
         ZStack {
-            // Soft state halo — flat glow, not a 3D shadow.
-            Circle()
+            // Soft colour bloom behind the shackle — a flat, tight glow, not a 3D halo.
+            Ellipse()
                 .fill(color)
-                .frame(width: r * 2.0, height: r * 2.0)
-                .blur(radius: size * 0.085)
-                .opacity(pulse ? 0.34 : 0.20)
+                .frame(width: barW * 1.05, height: barH * 1.7)
+                .blur(radius: size * 0.055)
+                .opacity(pulse ? 0.45 : 0.30)
+                .offset(x: locked ? 0 : ex, y: ey)
+                .animation(reduceMotion ? nil : .easeInOut(duration: duration), value: locked)
 
-            // Faint full-circle track so the gap reads as intentional.
-            Circle()
-                .stroke(Self.trackColor, lineWidth: t)
-                .frame(width: r * 2, height: r * 2)
-
-            // Main horseshoe ring.
+            // Main neutral horseshoe ring.
             Circle()
                 .trim(from: g, to: 1 - g)
                 .stroke(ringGradient, style: StrokeStyle(lineWidth: t, lineCap: .round))
                 .rotationEffect(.degrees(90))
                 .frame(width: r * 2, height: r * 2)
 
-            // LED / power dot in the centre.
+            // Centre state dot.
             Circle()
                 .fill(color)
-                .frame(width: t * 0.42, height: t * 0.42)
-                .opacity(pulse ? 0.4 : 0.95)
+                .frame(width: t * 0.48, height: t * 0.48)
+                .opacity(pulse ? 0.45 : 1)
 
-            // Shackle across the bottom gap; slides open/closed.
+            // Shackle across the bottom gap; slides open/closed with the motor.
             Capsule()
-                .fill(shackleGradient)
+                .fill(color)
                 .frame(width: barW, height: barH)
-                .opacity(pulse ? 0.5 : 1)
                 .offset(x: locked ? 0 : ex, y: ey)
                 .animation(reduceMotion ? nil : .easeInOut(duration: duration), value: locked)
         }
