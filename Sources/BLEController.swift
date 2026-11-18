@@ -450,7 +450,30 @@ final class BLEController: NSObject, ObservableObject {
     private static let restoreID = "com.ivoroo.linkaplus.central"
     private static let lastSerialKey = "ble_lastSerial"
     private static let lastNameKey = "ble_lastName"
-    private static let lastPeripheralKey = "ble_lastPeripheral"
+    private static let lastPeripheralKey = "ble_lastPeripheral"   // legacy single key; migrated per serial
+    private static func peripheralKey(_ serial: String) -> String { "ble_lastPeripheral_\(serial.uppercased())" }
+    private static func ownerKey(_ uuid: String) -> String { "ble_pOwner_\(uuid)" }
+
+    /// The CBPeripheral UUID we last connected to for this serial. iOS keeps the
+    /// same UUID per device per install, so this is the reliable way to recognise
+    /// the right lock on iOS (unlike Android, CoreBluetooth never exposes the MAC).
+    private func storedPeripheralUUID(for serial: String) -> String? {
+        let d = UserDefaults.standard
+        if let s = d.string(forKey: Self.peripheralKey(serial)) { return s }
+        // Migrate the old single key the first time, if it was this serial's lock.
+        if d.string(forKey: Self.lastSerialKey)?.caseInsensitiveCompare(serial) == .orderedSame,
+           let legacy = d.string(forKey: Self.lastPeripheralKey) {
+            d.set(legacy, forKey: Self.peripheralKey(serial))
+            d.set(serial, forKey: Self.ownerKey(legacy))
+            return legacy
+        }
+        return nil
+    }
+
+    private func rememberPeripheral(_ uuid: String, for serial: String) {
+        UserDefaults.standard.set(uuid, forKey: Self.peripheralKey(serial))
+        UserDefaults.standard.set(serial, forKey: Self.ownerKey(uuid))
+    }
 
     init(restoring: Bool = false) {
         super.init()
@@ -514,7 +537,7 @@ final class BLEController: NSObject, ObservableObject {
         guard !ready, state != "scannen", state != "verbinden", state != "services" else { return }
         intentionalStop = false
         // Known lock → pending connect (works in the background too); else scan.
-        if let s = UserDefaults.standard.string(forKey: Self.lastPeripheralKey), let id = UUID(uuidString: s),
+        if let serial = currentSerial, let s = storedPeripheralUUID(for: serial), let id = UUID(uuidString: s),
            let p = central.retrievePeripherals(withIdentifiers: [id]).first {
             ready = false
             add("Wachten op slot (automatisch verbinden)…")
@@ -776,6 +799,16 @@ extension BLEController: CBCentralManagerDelegate {
             // order than the serial, so filtering on it skipped every lock and the
             // app connected to nothing. A single lock always connects; the right-lock
             // guarantee for multiple locks is handled by configure()/release(unless:).
+            // The right lock on iOS: match the peripheral UUID we pinned at the
+            // first successful connect. Before that we fall back to the name.
+            let uuid = peripheral.identifier.uuidString
+            if let owner = UserDefaults.standard.string(forKey: Self.ownerKey(uuid)),
+               let serial = currentSerial, owner.caseInsensitiveCompare(serial) != .orderedSame {
+                return   // this peripheral belongs to a different lock of ours
+            }
+            if let serial = currentSerial, let known = storedPeripheralUUID(for: serial), known != uuid {
+                return   // we've pinned this lock already — only that exact peripheral
+            }
             let hint = nameHint?.lowercased()
             let isLock = name.lowercased().contains("linka") || name.lowercased().contains("leo")
             let match = hint.map { name.lowercased().contains($0) } ?? false
@@ -807,7 +840,7 @@ extension BLEController: CBCentralManagerDelegate {
     }
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         Task { @MainActor in
-            UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: Self.lastPeripheralKey)
+            if let serial = currentSerial { rememberPeripheral(peripheral.identifier.uuidString, for: serial) }
             state = "services"; peripheral.discoverServices([LinkaBLE.service, CBUUID(string: "180A"), CBUUID(string: "180F")]) }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
