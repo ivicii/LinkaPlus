@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add your LINKA lock",
+        "description": "Enter the lock's Bluetooth MAC and point to a LinkaPlus backup (.linkabackup) with its passphrase, or paste the AccessKeys JSON.",
+        "data": {
+          "mac": "Bluetooth MAC (e.g. FB:80:2B:7A:C2:EB)",
+          "name": "Name",
+          "backup_path": "Path to .linkabackup file (on the HA host)",
+          "passphrase": "Backup passphrase",
+          "keys_json": "…or paste AccessKeys JSON instead"
+        }
+      }
+    },
+    "error": {
+      "invalid_mac": "That MAC address is not valid.",
+      "bad_backup": "Could not decrypt the backup — wrong passphrase or corrupt file.",
+      "file_not_found": "No file at that path on the Home Assistant host.",
+      "invalid_keys": "No usable access key found for this lock."
+    },
+    "abort": {
+      "already_configured": "This lock is already set up."
+    }
+  }
+}
