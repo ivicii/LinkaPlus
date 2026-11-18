@@ -320,6 +320,13 @@ struct SlotSettingsPage: View {
                 Text("Zoals in de officiële app. Het slot blijft zo lang wakker (zichtbaar via Bluetooth) na de laatste activiteit; daarna slaapt het tot je op de knop drukt of het beweegt. Langer wakker = sneller verbinden, vaker opladen.")
             }
             Section {
+                Toggle(isOn: $ble.keepConnectedInBackground) {
+                    Label("Verbonden blijven op de achtergrond", systemImage: "bolt.horizontal.circle")
+                }
+            } header: { Text("Achtergrond") } footer: {
+                Text("Uit (aanbevolen): als je de app naar de achtergrond stuurt, laat LinkaPlus na ~1,5 min de verbinding los zodat je slot kan slapen en batterij spaart. Hij verbindt vanzelf weer als je de app opent of dichtbij komt.\nAan: de verbinding blijft staan zolang je in bereik bent — nodig voor alarmmeldingen op de achtergrond, maar kost slotbatterij. Auto-unlock (nabijheid) houdt de verbinding sowieso aan.")
+            }
+            Section {
                 stepper("Lock-sleep", unit: "s", icon: "moon.zzz", idx: 17, range: 600...86400, step: 60) { ble.setLockSleep($0) }
                 stepper("Unlock-sleep", unit: "s", icon: "moon", idx: 30, range: 600...86400, step: 60) { ble.setUnlockSleep($0) }
             } header: { Text("Slaapstand (handmatig)") } footer: {

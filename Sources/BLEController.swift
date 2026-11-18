@@ -1,5 +1,6 @@
 import Foundation
 import CoreBluetooth
+import UIKit
 
 /// Phase-2 open/close over Bluetooth. Reads the live counter from the lock's
 /// context frame (0x12-prefixed, encVer 2) and builds the command with the
@@ -475,16 +476,63 @@ final class BLEController: NSObject, ObservableObject {
         UserDefaults.standard.set(serial, forKey: Self.ownerKey(uuid))
     }
 
+    /// Keep the Bluetooth link alive while the app is backgrounded (for alarm
+    /// notifications). Default off: the link is released so the lock can sleep.
+    @Published var keepConnectedInBackground = UserDefaults.standard.bool(forKey: "keepConnectedBG") {
+        didSet { UserDefaults.standard.set(keepConnectedInBackground, forKey: "keepConnectedBG") }
+    }
+    private var pausedForBackground = false
+    private var backgroundReleaseTask: Task<Void, Never>?
+
     init(restoring: Bool = false) {
         super.init()
         var opts: [String: Any] = [:]
         if restoring { opts[CBCentralManagerOptionRestoreIdentifierKey] = Self.restoreID }
         central = CBCentralManager(delegate: self, queue: .main, options: opts)
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.appEnteredBackground() }
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.appEnteredForeground() }
+        }
         // After a background relaunch: reload the cached key so we can act at once.
         if restoring, let serial = UserDefaults.standard.string(forKey: Self.lastSerialKey),
            let keys = LockCache.loadKeys(serial: serial), keys.commandKey != nil {
             configure(keys: keys, serial: serial, nameHint: UserDefaults.standard.string(forKey: Self.lastNameKey))
         }
+    }
+
+    // MARK: Background connection policy
+
+    /// Backgrounded: after a short grace period, release the link so the lock can
+    /// sleep — unless the user keeps it on, or a feature needs the live link.
+    private func appEnteredBackground() {
+        guard !intentionalStop, !pausedForBackground else { return }
+        if keepConnectedInBackground || proximityUnlockEnabled { return }
+        backgroundReleaseTask?.cancel()
+        backgroundReleaseTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 90_000_000_000)   // 90 s grace
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.releaseForBackground() }
+        }
+    }
+
+    private func appEnteredForeground() {
+        backgroundReleaseTask?.cancel(); backgroundReleaseTask = nil
+        guard pausedForBackground else { return }
+        pausedForBackground = false
+        add("App weer op de voorgrond — opnieuw verbinden.")
+        if !intentionalStop, subkey.count == 16, mac.count == 6 { state = "idle"; start() }
+    }
+
+    /// Let go of the lock so its Bluetooth radio can enter deep sleep.
+    private func releaseForBackground() {
+        guard !intentionalStop else { return }
+        pausedForBackground = true
+        central?.stopScan()
+        if let p = peripheral { central?.cancelPeripheralConnection(p) }
+        ready = false; state = "slaapt"
+        add("Verbinding losgelaten op de achtergrond (slot mag slapen).")
     }
 
     /// Ask iOS to connect whenever the lock shows up — a pending connect never
@@ -908,9 +956,8 @@ extension BLEController: CBCentralManagerDelegate {
                 awayLatched = true; nearCount = 0
             }
             ctxCounter = nil; ctxEncVer = nil
-            // Auto-reconnect unless stopped on purpose: a pending connect that iOS
-            // completes as soon as the lock is back in range — also in the background.
-            if !intentionalStop, subkey.count == 16, mac.count == 6 {
+            // Auto-reconnect unless stopped on purpose or released for background.
+            if !intentionalStop, !pausedForBackground, subkey.count == 16, mac.count == 6 {
                 connectPending(peripheral)
             }
         }
