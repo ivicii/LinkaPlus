@@ -127,10 +127,30 @@ final class BLEController: NSObject, ObservableObject {
     /// Decode battery % and cell voltage from a status frame (type byte [1]==0x02).
     /// Field layout reverse-engineered from the official app (pc.f / pc.j):
     /// byte[6] = battery %, (byte[4]|byte[5]<<8)/1000 = voltage (V).
+    static let batteryWarnPct = 15
+
+    /// Fire a one-shot local notification when the lock battery gets low.
+    /// Re-arms only after it recovers above the threshold +10 or starts charging.
+    private func checkLowBattery(_ pct: Int) {
+        let serial = currentSerial ?? "lock"
+        let key = "battWarned_\(serial)"
+        let warned = UserDefaults.standard.bool(forKey: key)
+        if pct <= Self.batteryWarnPct && !isChargingBLE {
+            if !warned {
+                UserDefaults.standard.set(true, forKey: key)
+                LockNotifier.shared.notify(title: "Slot bijna leeg",
+                    body: "De batterij van je slot is \(pct)%. Laad het binnenkort op.",
+                    id: "lowbatt_\(serial)")
+            }
+        } else if (pct >= Self.batteryWarnPct + 10 || isChargingBLE), warned {
+            UserDefaults.standard.set(false, forKey: key)
+        }
+    }
+
     private func parseStatusFrame(_ d: [UInt8]) {
         guard d.count >= 7, d[0] == 0x14, d[1] == 0x02 else { return }
         let pct = Int(d[6])
-        if pct >= 0 && pct <= 100 { batteryLevelBLE = pct }
+        if pct >= 0 && pct <= 100 { batteryLevelBLE = pct; checkLowBattery(pct) }
         let mv = Int(d[4]) | (Int(d[5]) << 8)
         let v = Double(mv) / 1000.0
         if v > 1.0 && v < 6.0 { batteryVoltageBLE = v }

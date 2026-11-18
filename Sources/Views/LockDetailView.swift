@@ -610,6 +610,9 @@ struct LockDetailView: View {
                         OwnershipView(serial: serial, lockName: displayName)
                     } label: { Label("Eigendom wijzigen", systemImage: "person.crop.circle.badge.exclamationmark") }
                 }
+                NavigationLink {
+                    BackupView()
+                } label: { Label("Back-up & herstel", systemImage: "key.icloud") }
             }
 
             Section {
