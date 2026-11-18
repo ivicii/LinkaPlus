@@ -582,7 +582,7 @@ struct LockDetailView: View {
             Section("Locatie & data") {
                 if let serial = lock.serial_no {
                     NavigationLink {
-                        TrackingTestView(serial: serial)
+                        TrackingTestView(serial: serial, lockName: displayName)
                     } label: { Label("Tracking & recovery", systemImage: "dot.radiowaves.left.and.right") }
                 }
                 NavigationLink {

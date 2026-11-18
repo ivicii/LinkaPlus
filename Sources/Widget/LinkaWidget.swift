@@ -139,11 +139,61 @@ struct LinkaLockWidget: Widget {
     }
 }
 
+// MARK: Live Activity — tracking (recovery) on the lock screen / Dynamic Island
+
+@available(iOS 16.1, *)
+struct TrackingLiveActivity: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: TrackingActivityAttributes.self) { context in
+            HStack(spacing: 12) {
+                Image(systemName: "bicycle.circle.fill")
+                    .font(.title).foregroundStyle(Color(red: 0.20, green: 0.52, blue: 1.0))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(context.attributes.lockName).font(.headline).lineLimit(1)
+                    Text(context.state.statusText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    if let p = context.state.positionText {
+                        Text(p).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                VStack(spacing: 1) {
+                    Text("\(context.state.pointCount)").font(.title3.weight(.bold).monospacedDigit())
+                    Text("posities").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+            .activityBackgroundTint(Color.black.opacity(0.55))
+            .activitySystemActionForegroundColor(.white)
+        } dynamicIsland: { context in
+            DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    Label(context.attributes.lockName, systemImage: "bicycle")
+                        .font(.caption).lineLimit(1)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    Text("\(context.state.pointCount) pos.").font(.caption.weight(.semibold))
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    Text(context.state.positionText ?? context.state.statusText)
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            } compactLeading: {
+                Image(systemName: "bicycle").foregroundStyle(Color(red: 0.20, green: 0.52, blue: 1.0))
+            } compactTrailing: {
+                Text("\(context.state.pointCount)").font(.caption2.weight(.bold).monospacedDigit())
+            } minimal: {
+                Image(systemName: "bicycle").foregroundStyle(Color(red: 0.20, green: 0.52, blue: 1.0))
+            }
+        }
+    }
+}
+
 @main
 struct LinkaWidgets: WidgetBundle {
     var body: some Widget {
         LinkaControlWidget()
         LinkaUnlockWidget()
         LinkaLockWidget()
+        if #available(iOS 16.1, *) { TrackingLiveActivity() }
     }
 }

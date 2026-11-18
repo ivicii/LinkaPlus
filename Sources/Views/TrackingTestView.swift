@@ -9,6 +9,7 @@ import Foundation
 /// (polls current_tracking every 10 s, like the official TrackingActiveFragment).
 struct TrackingTestView: View {
     let serial: String
+    var lockName: String = "LINKA-slot"
     @EnvironmentObject var session: SessionStore
     @ObservedObject private var ble = BLEController.shared
     private let api = APIClient()
@@ -154,6 +155,28 @@ struct TrackingTestView: View {
         return serverText(d)
     }
 
+    /// Build the current Live Activity content from the tracking state.
+    @available(iOS 16.1, *)
+    private func liveState() -> TrackingActivityAttributes.ContentState {
+        let pos = points.last.map { String(format: "%.5f, %.5f", $0.latitude, $0.longitude) }
+        return .init(statusText: status ?? "Tracking actief",
+                     pointCount: points.count,
+                     lastUpdate: lastUpdate ?? Date(),
+                     positionText: pos)
+    }
+
+    private func startLiveActivity() {
+        if #available(iOS 16.1, *) {
+            LiveActivityManager.start(lockName: lockName, state: liveState())
+        }
+    }
+    private func updateLiveActivity() {
+        if #available(iOS 16.1, *) { LiveActivityManager.update(liveState()) }
+    }
+    private func endLiveActivity() {
+        if #available(iOS 16.1, *) { LiveActivityManager.end() }
+    }
+
     private func arm() {
         arming = true; status = nil
         // If we happen to be next to the lock, wake it so it checks in sooner.
@@ -166,6 +189,7 @@ struct TrackingTestView: View {
                 UserDefaults.standard.set(true, forKey: Self.armedKey(serial))
                 UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.startedKey(serial))
                 status = ble.ready ? "recovery aangezet" : "aangevraagd — wacht tot het slot zich meldt"
+                startLiveActivity()
                 startPolling()
             } catch {
                 let raw = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -190,6 +214,7 @@ struct TrackingTestView: View {
                     if pts.count != points.count { points = pts }
                     lastUpdate = Date()
                     status = acts.isEmpty ? "nog niet actief — wacht tot het slot zich meldt" : "\(acts.count) punt(en)"
+                    updateLiveActivity()
                 } catch {
                     status = shortError(error)
                 }
@@ -200,6 +225,7 @@ struct TrackingTestView: View {
 
     private func stop() {
         stopping = true
+        endLiveActivity()
         let auth = session.identity()
         Task {
             var off = false

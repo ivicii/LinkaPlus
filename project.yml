@@ -52,6 +52,7 @@ targets:
               - linkaplus
         UIBackgroundModes:
           - bluetooth-central
+        NSSupportsLiveActivities: true
         NSBluetoothAlwaysUsageDescription: "LinkaPlus gebruikt Bluetooth om verbinding te maken met je LINKA-slot."
         NSLocationWhenInUseUsageDescription: "LinkaPlus toont de locatie van je slot op een kaart ten opzichte van waar je nu bent."
         NSAppTransportSecurity:
@@ -66,6 +67,7 @@ targets:
     platform: iOS
     sources:
       - Sources/Widget
+      - Sources/Shared/TrackingActivity.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ivoroo.linkaplus.widget
