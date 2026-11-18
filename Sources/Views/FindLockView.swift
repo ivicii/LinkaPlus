@@ -8,6 +8,7 @@ struct FindLockView: View {
     let onSiren: () -> Void
     @Environment(\.dismiss) var dismiss
     @State private var tune = LockPrefs.finderTune
+    @State private var showBeepNeedsBT = false
 
     private static let nl = Locale(identifier: "nl_NL")
 
@@ -70,16 +71,17 @@ struct FindLockView: View {
                         .padding(.horizontal, 32)
 
                         VStack(spacing: 10) {
+                            // The melody is a Bluetooth-only command. Always tappable:
+                            // when not connected it explains why and offers the siren.
                             Button {
                                 Haptic.tap()
-                                if ble.ready { ble.playTune(tune) }
+                                if ble.ready { ble.playTune(tune) } else { showBeepNeedsBT = true }
                             } label: {
                                 Label("Laat slot piepen", systemImage: "music.note")
                                     .frame(maxWidth: .infinity).padding()
-                                    .background(tint.opacity(0.2))
+                                    .background(tint.opacity(ble.ready ? 0.2 : 0.1))
                                     .clipShape(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous))
                             }
-                            .disabled(!ble.ready)
 
                             // The lock has four melodies — tap to try, the choice is remembered.
                             HStack(spacing: 8) {
@@ -95,8 +97,11 @@ struct FindLockView: View {
                                             .background((tune == n ? tint : Color.secondary).opacity(tune == n ? 0.3 : 0.12))
                                             .clipShape(Circle())
                                     }
-                                    .disabled(!ble.ready)
                                 }
+                            }
+                            if !ble.ready {
+                                Text("De melodie werkt alleen via Bluetooth.")
+                                    .font(.caption2).foregroundStyle(.secondary)
                             }
 
                             if sirenActive {
@@ -106,13 +111,18 @@ struct FindLockView: View {
                                 }
                             } else {
                                 Button { Haptic.tap(); onSiren() } label: {
-                                    Label("Toch de sirene", systemImage: "speaker.wave.3.fill")
+                                    Label(ble.ready ? "Toch de sirene" : "Sirene (via internet)", systemImage: "speaker.wave.3.fill")
                                         .font(.footnote).foregroundStyle(.secondary)
                                 }
-                                .disabled(!ble.ready)
                             }
                         }
                         .padding(.horizontal, 24)
+                        .alert("Melodie werkt via Bluetooth", isPresented: $showBeepNeedsBT) {
+                            Button("Sirene via internet") { onSiren() }
+                            Button("Oké", role: .cancel) {}
+                        } message: {
+                            Text("Het zachte piepje is een Bluetooth-commando. Zet Bluetooth aan als je dichtbij bent. Op afstand kan LINKA alleen de volledige sirene afspelen, en dan alleen als je slot net wakker is.")
+                        }
                         Spacer(minLength: 0)
                         Text("Richting is niet mogelijk via Bluetooth (geen UWB) — dit is een signaalsterkte-schatting.")
                             .font(.caption2).foregroundStyle(.tertiary)
