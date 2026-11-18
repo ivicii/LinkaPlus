@@ -30,8 +30,6 @@ targets:
       - package: Stripe
         product: StripePayments
       - target: LinkaPlusWidget
-      - target: LinkaPlusWatch
-        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ivoroo.linkaplus
@@ -82,29 +80,11 @@ targets:
         CFBundleDisplayName: LinkaPlus
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
-  LinkaPlusWatch:
-    type: application
-    platform: watchOS
-    deploymentTarget: "9.0"
-    sources:
-      - Sources/Watch
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.ivoroo.linkaplus.watchkitapp
-        PRODUCT_NAME: LinkaPlusWatch
-        TARGETED_DEVICE_FAMILY: "4"
-    info:
-      path: Sources/Watch/Info.plist
-      properties:
-        CFBundleDisplayName: LinkaPlus
-        WKApplication: true
-        WKCompanionAppBundleIdentifier: com.ivoroo.linkaplus
 schemes:
   LinkaPlus:
     build:
       targets:
         LinkaPlus: all
         LinkaPlusWidget: all
-        LinkaPlusWatch: all
     run:
       config: Release
