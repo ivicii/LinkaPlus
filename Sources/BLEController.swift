@@ -770,13 +770,12 @@ extension BLEController: CBCentralManagerDelegate {
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                                     advertisementData: [String: Any], rssi RSSI: NSNumber) {
         let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name
-        let mfg = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
         Task { @MainActor in
             guard let name = name else { return }
-            // All locks advertise the same name. When the advert carries the lock's
-            // MAC, only connect to the lock we are configured for.
-            if let advMac = PairingController.macFromAdvert(mfg), let serial = currentSerial,
-               advMac.caseInsensitiveCompare(serial) != .orderedSame { return }
+            // NOTE: no MAC filter here. The advertised MAC comes in a different byte
+            // order than the serial, so filtering on it skipped every lock and the
+            // app connected to nothing. A single lock always connects; the right-lock
+            // guarantee for multiple locks is handled by configure()/release(unless:).
             let hint = nameHint?.lowercased()
             let isLock = name.lowercased().contains("linka") || name.lowercased().contains("leo")
             let match = hint.map { name.lowercased().contains($0) } ?? false
