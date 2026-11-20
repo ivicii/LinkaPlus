@@ -26,6 +26,14 @@ enum LocalActivityLog {
         return Date(timeIntervalSince1970: t)
     }
 
+    /// The most recent battery reading we actually saw (over Bluetooth), with its
+    /// age. There is no cloud battery feed, so this is the only "last known" value.
+    static func lastBattery(serial: String?) -> (pct: Int, date: Date)? {
+        guard let serial, let e = entries(serial).last(where: { ($0.battery ?? 0) > 0 }),
+              let b = e.battery else { return nil }
+        return (b, Date(timeIntervalSince1970: e.ts))
+    }
+
     static func load(serial: String?) -> [LockActivity] {
         guard let serial else { return [] }
         let f = ISO8601DateFormatter()

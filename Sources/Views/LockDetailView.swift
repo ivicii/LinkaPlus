@@ -84,11 +84,28 @@ struct LockDetailView: View {
     /// When the lock's GPS location was last updated (location_update_time).
     private var lastLocationDate: Date? { DateUtils.parseAny(lock.modifiedAt) }
 
-    /// Prefer the live BLE battery (works without cloud); fall back to cloud.
-    private var latestBattery: Int? {
-        ble.batteryLevelBLE ?? activities.compactMap { $0.batteryPercent }.first { $0 > 0 }
+    /// Live BLE battery (works without cloud). There is NO cloud battery feed, so
+    /// when we're not connected we show the last reading seen over Bluetooth, with
+    /// its age — never a pretend "online" value.
+    private var liveBattery: Int? { ble.batteryLevelBLE }
+    private var lastBatterySample: (pct: Int, date: Date)? {
+        LocalActivityLog.lastBattery(serial: lock.serial_no)
     }
-    private var batterySource: String { ble.batteryLevelBLE != nil ? "Bluetooth" : "cloud" }
+    private var latestBattery: Int? { liveBattery ?? lastBatterySample?.pct }
+
+    private func agoText(_ d: Date) -> String {
+        let f = RelativeDateTimeFormatter()
+        f.locale = Locale(identifier: "nl_NL")
+        f.unitsStyle = .full
+        return f.localizedString(for: d, relativeTo: Date())
+    }
+
+    private func batteryCaption(low: Bool) -> String {
+        let prefix = ble.isChargingBLE ? "opladen · " : (low ? "laag · " : "")
+        if liveBattery != nil { return prefix + "live via Bluetooth" }
+        if let s = lastBatterySample { return prefix + "laatste meting · \(agoText(s.date))" }
+        return prefix + "via Bluetooth"
+    }
 
     /// Best known coordinate: the lock's own, else the most recent located activity.
     private var coordinate: CLLocationCoordinate2D? {
@@ -313,7 +330,7 @@ struct LockDetailView: View {
                                 Text(String(format: "%.2f V", v)).foregroundStyle(.secondary)
                             }
                         }
-                        Text((ble.isChargingBLE ? "opladen · " : low ? "laag · " : "") + "via \(batterySource)")
+                        Text(batteryCaption(low: low))
                             .font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
