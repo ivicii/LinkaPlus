@@ -23,6 +23,11 @@ struct TrackingTestView: View {
     @State private var status: String?
     @State private var showLog = false
     @State private var loop: Task<Void, Never>?
+    @State private var armLoop: Task<Void, Never>?
+    @State private var armAttempts = 0
+    @State private var armSince: Date?
+
+    private let armRetryInterval: UInt64 = 15   // seconds between arm attempts
 
     /// Lock is reachable right now: BLE-connected means it is awake, so the
     /// server's recovery command will arrive. We also refresh it with a ping.
@@ -54,23 +59,36 @@ struct TrackingTestView: View {
             }
 
             Section {
-                if !armed {
-                    Button { arm() } label: {
-                        Label(arming ? "Bezig…" : "Start tracking", systemImage: "antenna.radiowaves.left.and.right")
-                    }
-                    .disabled(arming)
-                } else {
+                if armed {
                     Button(role: .destructive) { stop() } label: {
                         Label(stopping ? "Bezig…" : "Stop tracking", systemImage: "stop.circle.fill")
                     }
                     .disabled(stopping)
+                } else if arming {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Bezig met activeren… (poging \(armAttempts))")
+                            if let s = armSince {
+                                Text("Blijft proberen tot het slot zich meldt — gestart \(sinceText(s))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Button(role: .cancel) { cancelArming() } label: {
+                        Label("Stop proberen", systemImage: "xmark.circle")
+                    }
+                } else {
+                    Button { startArming() } label: {
+                        Label("Start tracking", systemImage: "antenna.radiowaves.left.and.right")
+                    }
                 }
             } footer: {
-                Text("Werkt óók als je slot weg is: de aanvraag wordt bij LINKA klaargezet en het slot pikt hem op zodra het zich meldt. Bij diefstal beweegt de fiets, en beweging maakt het slot wakker — meestal binnen enkele minuten. Je krijgt een bevestigingsmail van LINKA zodra het actief is; daarna verschijnen de posities hieronder. Blijft aan tot je stopt. Verbruikt data van je dataplan.")
+                Text("Werkt óók als je slot weg is: de app blijft de aanvraag automatisch opnieuw bij LINKA klaarzetten tot het slot zich meldt — je hoeft niet zelf te blijven tikken. Bij diefstal beweegt de fiets, en beweging maakt het slot wakker, meestal binnen enkele minuten. Je krijgt een bevestigingsmail van LINKA zodra het actief is; daarna verschijnen de posities hieronder. Blijft aan tot je stopt. Verbruikt data van je dataplan.")
             }
 
             Section("Status") {
-                row("Tracking", armed ? "aangevraagd/aan sinds \(started.map { sinceText($0) } ?? "–")" : "uit")
+                row("Tracking", armed ? "aangevraagd/aan sinds \(started.map { sinceText($0) } ?? "–")" : (arming ? "activeren… (poging \(armAttempts))" : "uit"))
                 row("Posities ontvangen", "\(points.count)")
                 row("Laatste update", lastUpdate.map { DateUtils.timeHM($0) } ?? "–")
                 if let last = points.last {
@@ -105,7 +123,7 @@ struct TrackingTestView: View {
         .navigationTitle("Tracking (recovery)")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { restore() }
-        .onDisappear { loop?.cancel() }
+        .onDisappear { loop?.cancel(); armLoop?.cancel() }
     }
 
     private func row(_ t: String, _ v: String) -> some View {
@@ -114,6 +132,8 @@ struct TrackingTestView: View {
 
     private static func armedKey(_ s: String) -> String { "recoveryArmed_\(s)" }
     private static func startedKey(_ s: String) -> String { "recoveryStarted_\(s)" }
+    private static func armingKey(_ s: String) -> String { "recoveryArming_\(s)" }
+    private static func firstFixKey(_ s: String) -> String { "recoveryFirstFix_\(s)" }
 
     /// Time only for today, otherwise date + time.
     private func sinceText(_ d: Date) -> String {
@@ -122,6 +142,7 @@ struct TrackingTestView: View {
 
     /// Reflect what the user themselves started (reliable), not a guessed server state.
     private func restore() {
+        LockNotifier.shared.requestAuth()
         if UserDefaults.standard.bool(forKey: Self.armedKey(serial)) {
             armed = true
             if started == nil {
@@ -130,6 +151,9 @@ struct TrackingTestView: View {
                 started = t > 0 ? Date(timeIntervalSince1970: t) : nil
             }
             startPolling()
+        } else if UserDefaults.standard.bool(forKey: Self.armingKey(serial)) {
+            // Was mid-arming when the app closed — pick the retrying back up.
+            startArming()
         }
     }
 
@@ -177,26 +201,57 @@ struct TrackingTestView: View {
         if #available(iOS 16.1, *) { LiveActivityManager.end() }
     }
 
-    private func arm() {
-        arming = true; status = nil
-        // If we happen to be next to the lock, wake it so it checks in sooner.
-        if ble.ready { ble.statePing() }
+    /// Keep asking LINKA to arm recovery until the server accepts it (it only does
+    /// once the lock has checked in), instead of the user tapping over and over.
+    /// Fires a notification the moment it goes live, and resumes if the app reopens.
+    private func startArming() {
+        guard !arming, !armed else { return }
+        arming = true; armAttempts = 0; armSince = Date(); status = "bezig met activeren…"
+        UserDefaults.standard.set(true, forKey: Self.armingKey(serial))
+        UserDefaults.standard.removeObject(forKey: Self.firstFixKey(serial))
         let auth = session.identity()
-        Task {
-            do {
-                try await api.setRecoveryMode(serial: serial, enabled: true, auth: auth)
-                armed = true; started = Date(); points = []
-                UserDefaults.standard.set(true, forKey: Self.armedKey(serial))
-                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.startedKey(serial))
-                status = ble.ready ? "recovery aangezet" : "aangevraagd — wacht tot het slot zich meldt"
-                startLiveActivity()
-                startPolling()
-            } catch {
-                let raw = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                status = "server weigert: \(String(raw.prefix(120)))"
+        armLoop?.cancel()
+        armLoop = Task {
+            while !Task.isCancelled && !armed {
+                armAttempts += 1
+                // If we're near the lock, wake it so it checks in sooner.
+                if ble.ready { ble.statePing() }
+                do {
+                    try await api.setRecoveryMode(serial: serial, enabled: true, auth: auth)
+                    armed = true; started = Date(); points = []
+                    UserDefaults.standard.set(true, forKey: Self.armedKey(serial))
+                    UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.startedKey(serial))
+                    UserDefaults.standard.removeObject(forKey: Self.armingKey(serial))
+                    status = "recovery actief — wacht op posities"
+                    LockNotifier.shared.notify(
+                        title: "Tracking staat aan",
+                        body: "\(lockName): recovery is geactiveerd. Je krijgt de posities zodra het slot zich meldt.",
+                        id: "recoveryActive_\(serial)")
+                    startLiveActivity()
+                    startPolling()
+                } catch {
+                    let raw = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    let l = raw.lowercased()
+                    if l.contains("not currently") || l.contains("no theft") || l.contains("not active") {
+                        status = "nog niet actief — blijft proberen (poging \(armAttempts))"
+                    } else if error is URLError {
+                        status = "netwerk even weg — blijft proberen (poging \(armAttempts))"
+                    } else {
+                        status = "server: \(String(raw.prefix(80))) — blijft proberen (poging \(armAttempts))"
+                    }
+                }
+                if armed || Task.isCancelled { break }
+                try? await Task.sleep(nanoseconds: armRetryInterval * 1_000_000_000)
             }
             arming = false
         }
+    }
+
+    private func cancelArming() {
+        armLoop?.cancel(); armLoop = nil
+        arming = false
+        UserDefaults.standard.removeObject(forKey: Self.armingKey(serial))
+        status = "activeren gestopt"
     }
 
     private func startPolling() {
@@ -211,7 +266,18 @@ struct TrackingTestView: View {
                         let t = DateUtils.parseAny(a.timestamp) ?? DateUtils.parseISO(a.createdAt) ?? Date.distantPast
                         return (t, CLLocationCoordinate2D(latitude: lat, longitude: lon))
                     }.sorted { $0.0 < $1.0 }.map { $0.1 }
-                    if pts.count != points.count { points = pts }
+                    if pts.count != points.count {
+                        points = pts
+                        // First real position in → alert (once per recovery session).
+                        if let first = pts.last,
+                           !UserDefaults.standard.bool(forKey: Self.firstFixKey(serial)) {
+                            UserDefaults.standard.set(true, forKey: Self.firstFixKey(serial))
+                            LockNotifier.shared.notify(
+                                title: "Eerste positie binnen",
+                                body: String(format: "%@: %.5f, %.5f", lockName, first.latitude, first.longitude),
+                                id: "recoveryFirstFix_\(serial)")
+                        }
+                    }
                     lastUpdate = Date()
                     status = acts.isEmpty ? "nog niet actief — wacht tot het slot zich meldt" : "\(acts.count) punt(en)"
                     updateLiveActivity()
@@ -247,9 +313,12 @@ struct TrackingTestView: View {
             }
             if off {
                 loop?.cancel(); loop = nil
+                armLoop?.cancel(); armLoop = nil
                 armed = false; started = nil
                 UserDefaults.standard.set(false, forKey: Self.armedKey(serial))
                 UserDefaults.standard.removeObject(forKey: Self.startedKey(serial))
+                UserDefaults.standard.removeObject(forKey: Self.armingKey(serial))
+                UserDefaults.standard.removeObject(forKey: Self.firstFixKey(serial))
             }
             stopping = false
         }
