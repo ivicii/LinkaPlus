@@ -45,16 +45,20 @@ struct TrackingTestView: View {
 
     var body: some View {
         List {
-            if armed {
+            if let last = points.last {
                 Section {
-                    if let last = points.last {
-                        LockMapView(coordinate: last, title: "Laatste positie", route: points)
-                            .frame(height: 220)
-                            .listRowInsets(EdgeInsets())
-                    } else {
-                        HStack { ProgressView(); Text("Wachten op eerste positie van het slot…") }
-                            .font(.callout).foregroundStyle(.secondary)
+                    LockMapView(coordinate: last, title: "Laatste positie", route: points)
+                        .frame(height: 220)
+                        .listRowInsets(EdgeInsets())
+                } footer: {
+                    if !armed {
+                        Text("Punten van de laatste tracking-sessie — die blijven bewaard tot je ze wist of nieuwe tracking start.")
                     }
+                }
+            } else if armed {
+                Section {
+                    HStack { ProgressView(); Text("Wachten op eerste positie van het slot…") }
+                        .font(.callout).foregroundStyle(.secondary)
                 }
             }
 
@@ -81,6 +85,11 @@ struct TrackingTestView: View {
                 } else {
                     Button { startArming() } label: {
                         Label("Start tracking", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    if !points.isEmpty {
+                        Button(role: .destructive) { clearPoints() } label: {
+                            Label("Wis kaart en punten", systemImage: "trash")
+                        }
                     }
                 }
             } footer: {
@@ -134,6 +143,26 @@ struct TrackingTestView: View {
     private static func startedKey(_ s: String) -> String { "recoveryStarted_\(s)" }
     private static func armingKey(_ s: String) -> String { "recoveryArming_\(s)" }
     private static func firstFixKey(_ s: String) -> String { "recoveryFirstFix_\(s)" }
+    private static func pointsKey(_ s: String) -> String { "recoveryPoints_\(s)" }
+
+    /// Keep the received positions on disk so the map survives stopping tracking
+    /// and relaunching the app, until the user wipes them or starts a new session.
+    private func savePoints() {
+        let arr = points.map { [$0.latitude, $0.longitude] }
+        if let d = try? JSONSerialization.data(withJSONObject: arr) {
+            UserDefaults.standard.set(d, forKey: Self.pointsKey(serial))
+        }
+    }
+    private func loadPoints() {
+        guard let d = UserDefaults.standard.data(forKey: Self.pointsKey(serial)),
+              let arr = try? JSONSerialization.jsonObject(with: d) as? [[Double]] else { return }
+        points = arr.compactMap { $0.count == 2 ? CLLocationCoordinate2D(latitude: $0[0], longitude: $0[1]) : nil }
+    }
+    private func clearPoints() {
+        points = []
+        lastUpdate = nil
+        UserDefaults.standard.removeObject(forKey: Self.pointsKey(serial))
+    }
 
     /// Time only for today, otherwise date + time.
     private func sinceText(_ d: Date) -> String {
@@ -143,6 +172,7 @@ struct TrackingTestView: View {
     /// Reflect what the user themselves started (reliable), not a guessed server state.
     private func restore() {
         LockNotifier.shared.requestAuth()
+        loadPoints()
         if UserDefaults.standard.bool(forKey: Self.armedKey(serial)) {
             armed = true
             if started == nil {
@@ -218,7 +248,7 @@ struct TrackingTestView: View {
                 if ble.ready { ble.statePing() }
                 do {
                     try await api.setRecoveryMode(serial: serial, enabled: true, auth: auth)
-                    armed = true; started = Date(); points = []
+                    armed = true; started = Date(); points = []; savePoints()
                     UserDefaults.standard.set(true, forKey: Self.armedKey(serial))
                     UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.startedKey(serial))
                     UserDefaults.standard.removeObject(forKey: Self.armingKey(serial))
@@ -268,6 +298,7 @@ struct TrackingTestView: View {
                     }.sorted { $0.0 < $1.0 }.map { $0.1 }
                     if pts.count != points.count {
                         points = pts
+                        savePoints()
                         // First real position in → alert (once per recovery session).
                         if let first = pts.last,
                            !UserDefaults.standard.bool(forKey: Self.firstFixKey(serial)) {
