@@ -128,6 +128,14 @@ struct TrackingTestView: View {
             } header: { Text("Slot") } footer: {
                 Text("‘CME ERROR: 516’ = nog geen GPS-fix. ‘SEND OK’ = het slot stuurt data naar LINKA.")
             }
+
+            Section {
+                NavigationLink {
+                    TrackingHistoryView(serial: serial, lockName: lockName)
+                } label: {
+                    Label("Tracking-geschiedenis", systemImage: "clock.arrow.circlepath")
+                }
+            }
         }
         .navigationTitle("Tracking (recovery)")
         .navigationBarTitleDisplayMode(.inline)
@@ -162,6 +170,16 @@ struct TrackingTestView: View {
         points = []
         lastUpdate = nil
         UserDefaults.standard.removeObject(forKey: Self.pointsKey(serial))
+    }
+
+    /// Archive the live points as a history session (keyed by start time, so poll
+    /// updates replace rather than duplicate). `ongoing: false` stamps the end.
+    private func upsertCurrentSession(ongoing: Bool) {
+        guard let started, !points.isEmpty else { return }
+        let s = TrackingSession(id: "s\(Int(started.timeIntervalSince1970))",
+                                start: started, end: ongoing ? nil : Date(),
+                                coords: points.map { [$0.latitude, $0.longitude] })
+        TrackingHistory.upsert(s, serial: serial)
     }
 
     /// Time only for today, otherwise date + time.
@@ -236,6 +254,8 @@ struct TrackingTestView: View {
     /// Fires a notification the moment it goes live, and resumes if the app reopens.
     private func startArming() {
         guard !arming, !armed else { return }
+        // Finalise any still-open previous session before starting a fresh one.
+        upsertCurrentSession(ongoing: false)
         arming = true; armAttempts = 0; armSince = Date(); status = "bezig met activeren…"
         UserDefaults.standard.set(true, forKey: Self.armingKey(serial))
         UserDefaults.standard.removeObject(forKey: Self.firstFixKey(serial))
@@ -299,6 +319,7 @@ struct TrackingTestView: View {
                     if pts.count != points.count {
                         points = pts
                         savePoints()
+                        upsertCurrentSession(ongoing: true)
                         // First real position in → alert (once per recovery session).
                         if let first = pts.last,
                            !UserDefaults.standard.bool(forKey: Self.firstFixKey(serial)) {
@@ -343,6 +364,7 @@ struct TrackingTestView: View {
                 }
             }
             if off {
+                upsertCurrentSession(ongoing: false)   // archive this session with its end time
                 loop?.cancel(); loop = nil
                 armLoop?.cancel(); armLoop = nil
                 armed = false; started = nil
