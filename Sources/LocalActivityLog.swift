@@ -44,7 +44,8 @@ enum LocalActivityLog {
                                 direction: e.kind == "open" ? 0 : e.kind == "close" ? 1 : nil,
                                 latitude: nil, longitude: nil, lock_serial_no: serial,
                                 msg_title: title, msg_desc: nil, timestamp: nil, timestamp_locked: nil,
-                                linka_activity_status: nil, batteryPercent: e.battery, owner: "local")
+                                linka_activity_status: nil, batteryPercent: e.battery, owner: "local",
+                                speed: nil, uncertainty: nil)
         }
     }
 }

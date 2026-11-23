@@ -261,6 +261,8 @@ struct LockActivity: Decodable, Identifiable {
     let linka_activity_status: Int?
     let batteryPercent: Int?
     let owner: String?
+    let speed: Int?          // m/s (server), shown as km/u
+    let uncertainty: Int?    // GPS accuracy radius in metres
 
     var id: String { _id ?? UUID().uuidString }
 

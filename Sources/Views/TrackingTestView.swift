@@ -27,6 +27,10 @@ struct TrackingTestView: View {
     @State private var armAttempts = 0
     @State private var armSince: Date?
     @State private var pointTimes: [Date] = []
+    @State private var pointSpeeds: [Double] = []
+    @State private var pointDirs: [Double] = []
+    @State private var pointUncs: [Double] = []
+    @State private var reportCount = 0
 
     private let armRetryInterval: UInt64 = 15   // seconds between arm attempts
 
@@ -177,12 +181,16 @@ struct TrackingTestView: View {
     /// updates replace rather than duplicate). `ongoing: false` stamps the end.
     private func upsertCurrentSession(ongoing: Bool) {
         guard let started, !points.isEmpty else { return }
-        let times: [Double]? = pointTimes.count == points.count
-            ? pointTimes.map { $0.timeIntervalSince1970 } : nil
+        let n = points.count
+        func aligned(_ a: [Double]) -> [Double]? { a.count == n ? a : nil }
         let s = TrackingSession(id: "s\(Int(started.timeIntervalSince1970))",
                                 start: started, end: ongoing ? nil : Date(),
                                 coords: points.map { [$0.latitude, $0.longitude] },
-                                times: times)
+                                times: pointTimes.count == n ? pointTimes.map { $0.timeIntervalSince1970 } : nil,
+                                speeds: aligned(pointSpeeds),
+                                headings: aligned(pointDirs),
+                                uncerts: aligned(pointUncs),
+                                reports: reportCount > 0 ? reportCount : nil)
         TrackingHistory.upsert(s, serial: serial)
     }
 
@@ -315,15 +323,20 @@ struct TrackingTestView: View {
             while !Task.isCancelled && armed {
                 do {
                     let acts = try await api.currentTracking(serial: serial, auth: auth)
-                    let pairs = acts.compactMap { a -> (Date, CLLocationCoordinate2D)? in
+                    let pairs = acts.compactMap { a -> (Date, CLLocationCoordinate2D, Double, Double, Double)? in
                         guard a.hasLocation, let lat = a.latitude, let lon = a.longitude else { return nil }
                         let t = DateUtils.parseAny(a.timestamp) ?? DateUtils.parseISO(a.createdAt) ?? Date.distantPast
-                        return (t, CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                        return (t, CLLocationCoordinate2D(latitude: lat, longitude: lon),
+                                Double(a.speed ?? -1), Double(a.direction ?? -1), Double(a.uncertainty ?? -1))
                     }.sorted { $0.0 < $1.0 }
                     let pts = pairs.map { $0.1 }
+                    reportCount = acts.count
                     if pts.count != points.count {
                         points = pts
                         pointTimes = pairs.map { $0.0 }
+                        pointSpeeds = pairs.map { $0.2 }
+                        pointDirs = pairs.map { $0.3 }
+                        pointUncs = pairs.map { $0.4 }
                         savePoints()
                         upsertCurrentSession(ongoing: true)
                         // First real position in → alert (once per recovery session).

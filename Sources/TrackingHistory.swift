@@ -8,6 +8,10 @@ struct TrackingSession: Codable, Identifiable {
     var end: Date?          // nil while still running
     var coords: [[Double]]  // [lat, lon] pairs
     var times: [Double]?    // epoch seconds per coord (same order); nil for old sessions
+    var speeds: [Double]?   // m/s per coord
+    var headings: [Double]? // raw direction value per coord (×10 = degrees)
+    var uncerts: [Double]?  // GPS accuracy radius (m) per coord
+    var reports: Int?       // total reports the lock sent (incl. ones without a fix)
 
     var locations: [CLLocationCoordinate2D] {
         coords.compactMap { $0.count >= 2 ? CLLocationCoordinate2D(latitude: $0[0], longitude: $0[1]) : nil }
@@ -18,6 +22,24 @@ struct TrackingSession: Codable, Identifiable {
         guard let times, i < times.count, times[i] > 0 else { return nil }
         return Date(timeIntervalSince1970: times[i])
     }
+    func speedKmh(at i: Int) -> Int? {
+        guard let speeds, i < speeds.count, speeds[i] >= 0 else { return nil }
+        return Int((speeds[i] * 3.6).rounded())
+    }
+    func headingDegrees(at i: Int) -> Int? {
+        guard let headings, i < headings.count, headings[i] >= 0 else { return nil }
+        return Int(headings[i]) * 10
+    }
+    func accuracy(at i: Int) -> Int? {
+        guard let uncerts, i < uncerts.count, uncerts[i] >= 0 else { return nil }
+        return Int(uncerts[i].rounded())
+    }
+    /// A position is flagged imprecise at ≥ 50 m, like the official app.
+    func isImprecise(at i: Int) -> Bool {
+        if let u = accuracy(at: i) { return u >= 50 }
+        return false
+    }
+    var impreciseCount: Int { (0..<coords.count).filter { isImprecise(at: $0) }.count }
 }
 
 /// Per-lock archive of tracking sessions, stored in UserDefaults so each session's

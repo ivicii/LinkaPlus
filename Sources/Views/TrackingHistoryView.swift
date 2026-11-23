@@ -58,7 +58,8 @@ struct TrackingSessionDetailView: View {
             if !locs.isEmpty {
                 Section {
                     SessionMapView(points: locs,
-                                   times: session.times?.map { Date(timeIntervalSince1970: $0) } ?? []) { idx in
+                                   subtitles: (0..<locs.count).map { metaLine($0) },
+                                   imprecise: (0..<locs.count).map { session.isImprecise(at: $0) }) { idx in
                         MapsLauncher.open(locs[idx], name: pointName(idx), directions: true)
                     }
                     .frame(height: 300)
@@ -94,15 +95,20 @@ struct TrackingSessionDetailView: View {
                             HStack {
                                 Image(systemName: i == locs.count - 1 ? "flag.checkered" : "\(min(i + 1, 50)).circle")
                                     .foregroundStyle(i == locs.count - 1 ? Color.red : .secondary)
-                                VStack(alignment: .leading, spacing: 1) {
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text(i == locs.count - 1 ? "Laatste positie" : "Positie \(i + 1)")
-                                    if let d = session.date(at: i) {
-                                        Text(Self.hms(d)).font(.caption2).foregroundStyle(.secondary)
+                                    let meta = metaLine(i)
+                                    if !meta.isEmpty {
+                                        Text(meta).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    if session.isImprecise(at: i) {
+                                        Label("onnauwkeurig", systemImage: "scope")
+                                            .font(.caption2).foregroundStyle(.orange)
                                     }
                                 }
                                 Spacer()
                                 Text(String(format: "%.5f, %.5f", c.latitude, c.longitude))
-                                    .font(.callout).foregroundStyle(.secondary)
+                                    .font(.caption).foregroundStyle(.secondary)
                                 Image(systemName: "ellipsis.circle").foregroundStyle(.tertiary)
                             }
                         }
@@ -119,6 +125,12 @@ struct TrackingSessionDetailView: View {
                 row("Geëindigd", session.end.map(Self.dateTime) ?? "lopend")
                 row("Duur", durationText)
                 row("Posities", "\(locs.count)")
+                if let r = session.reports, r > locs.count {
+                    row("Rapportages", "\(r) totaal · \(locs.count) met locatie")
+                }
+                if session.impreciseCount > 0 {
+                    row("Onnauwkeurig", "\(session.impreciseCount) × ≥ 50 m")
+                }
             }
         }
         .navigationTitle(TrackingHistoryView.rangeText(session))
@@ -146,6 +158,22 @@ struct TrackingSessionDetailView: View {
     private static func hms(_ d: Date) -> String {
         let f = DateFormatter(); f.locale = Locale(identifier: "nl_NL"); f.dateFormat = "HH:mm:ss"
         return f.string(from: d)
+    }
+
+    /// "17:38:02 · 14 km/u · NO · ±18 m" — only the parts the server actually sent.
+    private func metaLine(_ i: Int) -> String {
+        var parts: [String] = []
+        if let d = session.date(at: i) { parts.append(Self.hms(d)) }
+        if let s = session.speedKmh(at: i) { parts.append("\(s) km/u") }
+        if let h = session.headingDegrees(at: i) { parts.append(Self.compass(h)) }
+        if let a = session.accuracy(at: i) { parts.append("±\(a) m") }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func compass(_ deg: Int) -> String {
+        let dirs = ["N", "NO", "O", "ZO", "Z", "ZW", "W", "NW"]
+        let idx = ((Int((Double(deg) / 45.0).rounded()) % 8) + 8) % 8
+        return dirs[idx]
     }
 
     private func row(_ t: String, _ v: String) -> some View {
@@ -176,12 +204,9 @@ enum MapsLauncher {
 /// pin's callout ⓘ calls `onSelect` with that point's index.
 struct SessionMapView: UIViewRepresentable {
     let points: [CLLocationCoordinate2D]
-    var times: [Date] = []
+    var subtitles: [String] = []
+    var imprecise: [Bool] = []
     var onSelect: ((Int) -> Void)? = nil
-
-    private static let hms: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "nl_NL"); f.dateFormat = "HH:mm:ss"; return f
-    }()
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -209,7 +234,8 @@ struct SessionMapView: UIViewRepresentable {
             a.isLast = (i == points.count - 1)
             a.title = a.isLast ? "Laatste positie" : "Positie \(i + 1)"
             let coordStr = String(format: "%.5f, %.5f", c.latitude, c.longitude)
-            a.subtitle = i < times.count ? "\(Self.hms.string(from: times[i])) · \(coordStr)" : coordStr
+            a.subtitle = (i < subtitles.count && !subtitles[i].isEmpty) ? subtitles[i] : coordStr
+            a.isImprecise = i < imprecise.count ? imprecise[i] : false
             map.addAnnotation(a)
         }
         if points.count > 1 {
@@ -240,6 +266,7 @@ struct SessionMapView: UIViewRepresentable {
         var subtitle: String?
         var index = 0
         var isLast = false
+        var isImprecise = false
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
@@ -269,7 +296,7 @@ struct SessionMapView: UIViewRepresentable {
                 v.glyphImage = UIImage(systemName: "bicycle")
                 v.displayPriority = .required
             } else {
-                v.markerTintColor = .systemBlue
+                v.markerTintColor = a.isImprecise ? .systemOrange : .systemBlue
                 v.glyphText = "\(a.index + 1)"
                 v.displayPriority = .defaultHigh
             }
