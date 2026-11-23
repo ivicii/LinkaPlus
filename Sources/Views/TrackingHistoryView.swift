@@ -77,7 +77,7 @@ struct TrackingSessionDetailView: View {
                     }
                 }
 
-                Section("Posities (\(locs.count))") {
+                Section {
                     ForEach(Array(locs.enumerated()), id: \.offset) { i, c in
                         Menu {
                             Button { MapsLauncher.open(c, name: pointName(i), directions: true) } label: {
@@ -101,6 +101,8 @@ struct TrackingSessionDetailView: View {
                             }
                         }
                     }
+                } header: {
+                    Text("Posities (\(locs.count))")
                 } footer: {
                     Text("Tik op een positie om ernaartoe te navigeren of 'm in Apple Maps te openen. Op de kaart: tik een pin aan en daarna de ⓘ-knop.")
                 }
