@@ -57,7 +57,8 @@ struct TrackingSessionDetailView: View {
         List {
             if !locs.isEmpty {
                 Section {
-                    SessionMapView(points: locs) { idx in
+                    SessionMapView(points: locs,
+                                   times: session.times?.map { Date(timeIntervalSince1970: $0) } ?? []) { idx in
                         MapsLauncher.open(locs[idx], name: pointName(idx), directions: true)
                     }
                     .frame(height: 300)
@@ -93,7 +94,12 @@ struct TrackingSessionDetailView: View {
                             HStack {
                                 Image(systemName: i == locs.count - 1 ? "flag.checkered" : "\(min(i + 1, 50)).circle")
                                     .foregroundStyle(i == locs.count - 1 ? Color.red : .secondary)
-                                Text(i == locs.count - 1 ? "Laatste positie" : "Positie \(i + 1)")
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(i == locs.count - 1 ? "Laatste positie" : "Positie \(i + 1)")
+                                    if let d = session.date(at: i) {
+                                        Text(Self.hms(d)).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
                                 Spacer()
                                 Text(String(format: "%.5f, %.5f", c.latitude, c.longitude))
                                     .font(.callout).foregroundStyle(.secondary)
@@ -137,6 +143,11 @@ struct TrackingSessionDetailView: View {
         return f.string(from: d)
     }
 
+    private static func hms(_ d: Date) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "nl_NL"); f.dateFormat = "HH:mm:ss"
+        return f.string(from: d)
+    }
+
     private func row(_ t: String, _ v: String) -> some View {
         HStack { Text(t); Spacer(); Text(v).foregroundStyle(.secondary) }
     }
@@ -165,7 +176,12 @@ enum MapsLauncher {
 /// pin's callout ⓘ calls `onSelect` with that point's index.
 struct SessionMapView: UIViewRepresentable {
     let points: [CLLocationCoordinate2D]
+    var times: [Date] = []
     var onSelect: ((Int) -> Void)? = nil
+
+    private static let hms: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "nl_NL"); f.dateFormat = "HH:mm:ss"; return f
+    }()
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -192,7 +208,8 @@ struct SessionMapView: UIViewRepresentable {
             a.index = i
             a.isLast = (i == points.count - 1)
             a.title = a.isLast ? "Laatste positie" : "Positie \(i + 1)"
-            a.subtitle = String(format: "%.5f, %.5f", c.latitude, c.longitude)
+            let coordStr = String(format: "%.5f, %.5f", c.latitude, c.longitude)
+            a.subtitle = i < times.count ? "\(Self.hms.string(from: times[i])) · \(coordStr)" : coordStr
             map.addAnnotation(a)
         }
         if points.count > 1 {

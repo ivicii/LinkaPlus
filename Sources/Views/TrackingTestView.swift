@@ -26,6 +26,7 @@ struct TrackingTestView: View {
     @State private var armLoop: Task<Void, Never>?
     @State private var armAttempts = 0
     @State private var armSince: Date?
+    @State private var pointTimes: [Date] = []
 
     private let armRetryInterval: UInt64 = 15   // seconds between arm attempts
 
@@ -176,9 +177,12 @@ struct TrackingTestView: View {
     /// updates replace rather than duplicate). `ongoing: false` stamps the end.
     private func upsertCurrentSession(ongoing: Bool) {
         guard let started, !points.isEmpty else { return }
+        let times: [Double]? = pointTimes.count == points.count
+            ? pointTimes.map { $0.timeIntervalSince1970 } : nil
         let s = TrackingSession(id: "s\(Int(started.timeIntervalSince1970))",
                                 start: started, end: ongoing ? nil : Date(),
-                                coords: points.map { [$0.latitude, $0.longitude] })
+                                coords: points.map { [$0.latitude, $0.longitude] },
+                                times: times)
         TrackingHistory.upsert(s, serial: serial)
     }
 
@@ -311,13 +315,15 @@ struct TrackingTestView: View {
             while !Task.isCancelled && armed {
                 do {
                     let acts = try await api.currentTracking(serial: serial, auth: auth)
-                    let pts = acts.compactMap { a -> (Date, CLLocationCoordinate2D)? in
+                    let pairs = acts.compactMap { a -> (Date, CLLocationCoordinate2D)? in
                         guard a.hasLocation, let lat = a.latitude, let lon = a.longitude else { return nil }
                         let t = DateUtils.parseAny(a.timestamp) ?? DateUtils.parseISO(a.createdAt) ?? Date.distantPast
                         return (t, CLLocationCoordinate2D(latitude: lat, longitude: lon))
-                    }.sorted { $0.0 < $1.0 }.map { $0.1 }
+                    }.sorted { $0.0 < $1.0 }
+                    let pts = pairs.map { $0.1 }
                     if pts.count != points.count {
                         points = pts
+                        pointTimes = pairs.map { $0.0 }
                         savePoints()
                         upsertCurrentSession(ongoing: true)
                         // First real position in → alert (once per recovery session).

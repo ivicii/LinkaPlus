@@ -7,9 +7,16 @@ struct TrackingSession: Codable, Identifiable {
     var start: Date
     var end: Date?          // nil while still running
     var coords: [[Double]]  // [lat, lon] pairs
+    var times: [Double]?    // epoch seconds per coord (same order); nil for old sessions
 
     var locations: [CLLocationCoordinate2D] {
-        coords.compactMap { $0.count == 2 ? CLLocationCoordinate2D(latitude: $0[0], longitude: $0[1]) : nil }
+        coords.compactMap { $0.count >= 2 ? CLLocationCoordinate2D(latitude: $0[0], longitude: $0[1]) : nil }
+    }
+
+    /// Timestamp of the position at `i`, when known.
+    func date(at i: Int) -> Date? {
+        guard let times, i < times.count, times[i] > 0 else { return nil }
+        return Date(timeIntervalSince1970: times[i])
     }
 }
 
