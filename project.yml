@@ -53,9 +53,10 @@ targets:
               - linkaplus
         UIBackgroundModes:
           - bluetooth-central
+          - location
         NSSupportsLiveActivities: true
         NSBluetoothAlwaysUsageDescription: "LinkaPlus gebruikt Bluetooth om verbinding te maken met je LINKA-slot."
-        NSLocationWhenInUseUsageDescription: "LinkaPlus toont de locatie van je slot op een kaart ten opzichte van waar je nu bent."
+        NSLocationWhenInUseUsageDescription: "LinkaPlus toont de locatie van je slot ten opzichte van waar je nu bent, en gebruikt je locatie tijdens 'Volg je fiets' om afstand en richting naar je fiets te tonen — ook op de achtergrond."
         NSAppTransportSecurity:
           NSExceptionDomains:
             linkalock.com:

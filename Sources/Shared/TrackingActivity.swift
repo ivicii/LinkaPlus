@@ -11,6 +11,7 @@ struct TrackingActivityAttributes: ActivityAttributes {
         var pointCount: Int
         var lastUpdate: Date
         var positionText: String?
+        var distanceText: String? = nil   // "1,2 km" while following
     }
     var lockName: String
 }

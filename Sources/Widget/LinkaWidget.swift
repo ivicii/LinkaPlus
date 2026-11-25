@@ -157,8 +157,13 @@ struct TrackingLiveActivity: Widget {
                 }
                 Spacer()
                 VStack(spacing: 1) {
-                    Text("\(context.state.pointCount)").font(.title3.weight(.bold).monospacedDigit())
-                    Text("posities").font(.caption2).foregroundStyle(.secondary)
+                    if let d = context.state.distanceText {
+                        Text(d).font(.title3.weight(.bold).monospacedDigit())
+                        Text("afstand").font(.caption2).foregroundStyle(.secondary)
+                    } else {
+                        Text("\(context.state.pointCount)").font(.title3.weight(.bold).monospacedDigit())
+                        Text("posities").font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
             }
             .padding()
@@ -171,16 +176,20 @@ struct TrackingLiveActivity: Widget {
                         .font(.caption).lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text("\(context.state.pointCount) pos.").font(.caption.weight(.semibold))
+                    Text(context.state.distanceText ?? "\(context.state.pointCount) pos.").font(.caption.weight(.semibold))
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Text(context.state.positionText ?? context.state.statusText)
-                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    VStack(spacing: 2) {
+                        Text(context.state.statusText).font(.caption).lineLimit(1)
+                        if let p = context.state.positionText {
+                            Text(p).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
                 }
             } compactLeading: {
                 Image(systemName: "bicycle").foregroundStyle(Color(red: 0.20, green: 0.52, blue: 1.0))
             } compactTrailing: {
-                Text("\(context.state.pointCount)").font(.caption2.weight(.bold).monospacedDigit())
+                Text(context.state.distanceText ?? "\(context.state.pointCount)").font(.caption2.weight(.bold).monospacedDigit())
             } minimal: {
                 Image(systemName: "bicycle").foregroundStyle(Color(red: 0.20, green: 0.52, blue: 1.0))
             }

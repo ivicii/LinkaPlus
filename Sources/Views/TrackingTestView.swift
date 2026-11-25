@@ -12,6 +12,7 @@ struct TrackingTestView: View {
     var lockName: String = "LINKA-slot"
     @EnvironmentObject var session: SessionStore
     @ObservedObject private var ble = BLEController.shared
+    @ObservedObject private var follow = FollowEngine.shared
     private let api = APIClient()
 
     @State private var armed = false
@@ -37,6 +38,24 @@ struct TrackingTestView: View {
     /// Lock is reachable right now: BLE-connected means it is awake, so the
     /// server's recovery command will arrive. We also refresh it with a ping.
     private var lockAwake: Bool { ble.ready }
+
+    private var followActive: Bool { follow.active && follow.serial == serial }
+
+    /// While follow mode runs it does the polling; mirror its data here instead of
+    /// polling twice, so the map, history and stop-archive all stay complete.
+    private func syncFromFollow() {
+        let f = follow.fixes
+        if f.count != points.count {
+            points = f.map { $0.coord }
+            pointTimes = f.map { $0.time }
+            pointSpeeds = f.map { $0.speed }
+            pointDirs = f.map { $0.dir }
+            pointUncs = f.map { $0.unc }
+        }
+        reportCount = follow.reportCount
+        lastUpdate = follow.lastPoll
+        status = "volgen actief — \(f.count) punt(en)"
+    }
 
     private var modemLines: [String] {
         let keys = ["QGPSLOC", "QGPS", "QIOPEN", "SEND OK", "QISEND", "CSQ", "CME ERROR"]
@@ -64,6 +83,27 @@ struct TrackingTestView: View {
                 Section {
                     HStack { ProgressView(); Text("Wachten op eerste positie van het slot…") }
                         .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+
+            if armed {
+                Section {
+                    NavigationLink {
+                        FollowView(serial: serial, lockName: lockName)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "scope")
+                                .font(.title2).foregroundStyle(.white)
+                                .frame(width: 40, height: 40)
+                                .background(Color.red, in: RoundedRectangle(cornerRadius: 10))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Volg je fiets live").font(.headline)
+                                Text(followActive ? "Volgen actief — tik om te openen" : "Afstand, richting en kaart · loopt door op de achtergrond")
+                                    .font(.caption).foregroundStyle(followActive ? .green : .secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
             }
 
@@ -211,6 +251,8 @@ struct TrackingTestView: View {
                 started = t > 0 ? Date(timeIntervalSince1970: t) : nil
             }
             startPolling()
+            // Re-attach / re-create the Live Activity after iOS relaunched the app.
+            if #available(iOS 16.1, *) { LiveActivityManager.ensure(lockName: lockName, state: liveState()) }
         } else if UserDefaults.standard.bool(forKey: Self.armingKey(serial)) {
             // Was mid-arming when the app closed — pick the retrying back up.
             startArming()
@@ -321,6 +363,11 @@ struct TrackingTestView: View {
         let auth = session.identity()
         loop = Task {
             while !Task.isCancelled && armed {
+                if followActive {
+                    syncFromFollow()
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    continue
+                }
                 do {
                     let acts = try await api.currentTracking(serial: serial, auth: auth)
                     let pairs = acts.compactMap { a -> (Date, CLLocationCoordinate2D, Double, Double, Double)? in
@@ -362,6 +409,10 @@ struct TrackingTestView: View {
 
     private func stop() {
         stopping = true
+        if followActive {
+            syncFromFollow()
+            follow.stop()
+        }
         endLiveActivity()
         let auth = session.identity()
         Task {
