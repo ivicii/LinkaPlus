@@ -52,6 +52,7 @@ struct LockDetailView: View {
     }
 
     @State private var lastStatePing = Date.distantPast
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var liveLocked: Bool { ble.liveLocked ?? lock.is_locked ?? true }
 
     /// The lock state we actually know from Bluetooth (nil = not yet known).
@@ -121,21 +122,22 @@ struct LockDetailView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // Shrink the lock on short screens. The map always stays: the screen
-            // scrolls, and the map is the only way to the full-screen map.
-            let lockSize = min(230, max(140, geo.size.height - 470))
-            // Fills the screen when everything fits; scrolls when it doesn't (large
-            // text, landscape, small phones) — and gives pull-to-refresh.
+            // Everything on one screen: map, parked card, stats and buttons keep
+            // their natural size and the lock takes whatever height is left.
+            // With accessibility text sizes the page grows and scrolls instead.
+            let fit = !dynamicTypeSize.isAccessibilitySize
             ScrollView {
                 VStack(spacing: 0) {
                     compactMap
                     if let parked { parkedCard(parked) }
-                    Spacer(minLength: 10)
-                    heroControl(size: lockSize)
-                    Spacer(minLength: 10)
+                    heroControl(fill: fit)
+                        .padding(.vertical, 8)
+                        .frame(maxHeight: fit ? .infinity : nil)
                     mainButtons
                 }
-                .frame(maxWidth: 560, minHeight: geo.size.height, alignment: .top)   // iPad: no 1000 pt wide buttons
+                .frame(maxWidth: 560)
+                .frame(minHeight: geo.size.height,
+                       maxHeight: fit ? geo.size.height : .infinity, alignment: .top)
                 .frame(maxWidth: .infinity)
             }
             .scrollIndicators(.hidden)
@@ -757,36 +759,17 @@ struct LockDetailView: View {
         }
     }
 
-    private func heroControl(size: CGFloat) -> some View {
-        VStack(spacing: 14) {
+    private func heroControl(fill: Bool) -> some View {
+        VStack(spacing: 10) {
             connectionPill
 
-            // Flat lock — tap to toggle, same action as the Openen/Sluiten buttons.
-            Button {
-                Haptic.tap()
-                let locked = heroLocked
-                // No optimistic flip: the bar follows the lock's own status
-                // (locking/unlocking → locked/unlocked), like the official app.
-                ble.channel = 0; ble.counterOffset = 0
-                if locked { ble.unlock() } else { ble.lock() }
-            } label: {
-                LockGraphic(locked: barClosed, color: heroColor, size: size,
-                            moving: ble.motion != nil, duration: ble.motorDuration)
-                    .background(
-                        // State-coloured glow, like the widget's.
-                        Circle()
-                            .fill(RadialGradient(colors: [heroColor.opacity(0.32), heroColor.opacity(0)],
-                                                 center: .center, startRadius: 0, endRadius: size * 0.8))
-                            .frame(width: size * 1.7, height: size * 1.7)
-                            .animation(.easeInOut(duration: 0.35), value: heroColor)
-                    )
-                    .accessibilityHidden(true)
+            // The lock takes the height that is left on screen (110–230 pt).
+            GeometryReader { g in
+                let size = max(110, min(230, g.size.width, g.size.height))
+                lockButton(size: size)
+                    .frame(width: g.size.width, height: g.size.height)
             }
-            .buttonStyle(PressableStyle())
-            .disabled(!ble.ready)
-            .opacity(ble.ready ? 1 : 0.45)
-            .accessibilityLabel(knownLocked == nil ? "Slotstatus onbekend" : (heroLocked ? "Slot is dicht" : "Slot is open"))
-            .accessibilityHint(heroSubtitle)
+            .frame(minHeight: fill ? 110 : 200)
 
             // One fixed-height slot for hint / command result → no layout jumps.
             Group {
@@ -795,11 +778,40 @@ struct LockDetailView: View {
             }
             .multilineTextAlignment(.center)
             .lineLimit(2).minimumScaleFactor(0.85)
-            .frame(minHeight: 44)
+            .frame(minHeight: 34)
 
             statCard
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// Flat lock — tap to toggle, same action as the Openen/Sluiten buttons.
+    private func lockButton(size: CGFloat) -> some View {
+        Button {
+            Haptic.tap()
+            let locked = heroLocked
+            // No optimistic flip: the bar follows the lock's own status
+            // (locking/unlocking → locked/unlocked), like the official app.
+            ble.channel = 0; ble.counterOffset = 0
+            if locked { ble.unlock() } else { ble.lock() }
+        } label: {
+            LockGraphic(locked: barClosed, color: heroColor, size: size,
+                        moving: ble.motion != nil, duration: ble.motorDuration)
+                .background(
+                    // State-coloured glow, like the widget's.
+                    Circle()
+                        .fill(RadialGradient(colors: [heroColor.opacity(0.32), heroColor.opacity(0)],
+                                             center: .center, startRadius: 0, endRadius: size * 0.8))
+                        .frame(width: size * 1.7, height: size * 1.7)
+                        .animation(.easeInOut(duration: 0.35), value: heroColor)
+                )
+                .accessibilityHidden(true)
+        }
+        .buttonStyle(PressableStyle())
+        .disabled(!ble.ready)
+        .opacity(ble.ready ? 1 : 0.45)
+        .accessibilityLabel(knownLocked == nil ? "Slotstatus onbekend" : (heroLocked ? "Slot is dicht" : "Slot is open"))
+        .accessibilityHint(heroSubtitle)
     }
 
     private var connectionPill: some View {
@@ -855,7 +867,7 @@ struct LockDetailView: View {
         Button { showFullMap = true } label: {
             mapView
                 .allowsHitTesting(false)
-                .frame(height: 148)
+                .frame(height: 128)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 .overlay(alignment: .topTrailing) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -1044,23 +1056,24 @@ struct LockDetailView: View {
             return DistanceText.format(meters: m)
         }
         Button { showParkedSheet = true } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Image(systemName: "bicycle.circle.fill")
-                    .font(.title2).foregroundStyle(Theme.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Geparkeerd").font(.subheadline.weight(.semibold))
-                    Text("\(DateUtils.absoluteWithRelative(spot.date))" + (dist.map { " · \($0)" } ?? ""))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
+                    .font(.title3).foregroundStyle(Theme.accent)
+                (Text("Geparkeerd").fontWeight(.semibold)
+                 + Text(" · \(DateUtils.relative(spot.date))" + (dist.map { " · \($0)" } ?? ""))
+                    .foregroundColor(.secondary))
+                    .font(.subheadline)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                Spacer(minLength: 4)
                 Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
-                    .font(.title2).foregroundStyle(Theme.accent)
+                    .font(.title3).foregroundStyle(Theme.accent)
             }
-            .padding(.vertical, 10).padding(.horizontal, 14)
+            .padding(.vertical, 9).padding(.horizontal, 14)
             .background(GlassCard())
         }
         .buttonStyle(.plain)
         .padding(.top, 8)
+        .accessibilityHint("Toont waar je fiets geparkeerd staat")
     }
 
     private func navigateApple(_ c: CLLocationCoordinate2D, walking: Bool) {
