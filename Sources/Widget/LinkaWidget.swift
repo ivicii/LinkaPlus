@@ -69,6 +69,73 @@ private struct ActionTile: View {
     }
 }
 
+private let toggleColor = Color(red: 0.20, green: 0.52, blue: 1.0)
+
+/// One button that does what the Action button does: open when locked, close
+/// when open. The widget can't see the lock, so the app decides on tap.
+private struct ToggleGlyph: View {
+    var size: CGFloat
+    var body: some View {
+        MiniLock(locked: false, color: toggleColor, size: size)
+            .overlay(alignment: .bottomTrailing) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: size * 0.26, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(size * 0.08)
+                    .background(Circle().fill(toggleColor))
+                    .offset(x: size * 0.06, y: size * 0.04)
+            }
+    }
+}
+
+struct LinkaToggleView: View {
+    @Environment(\.widgetFamily) var family
+    var body: some View {
+        Group {
+            switch family {
+            case .accessoryCircular:
+                ZStack {
+                    AccessoryBackgroundCircle()
+                    Image(systemName: "lock.rotation").font(.title3.weight(.semibold))
+                }
+            case .accessoryRectangular:
+                HStack(spacing: 8) {
+                    Image(systemName: "lock.rotation").font(.title2.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("LINKA").font(.headline)
+                        Text("Open / dicht").font(.caption)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            case .systemMedium:
+                HStack(spacing: 18) {
+                    ToggleGlyph(size: 64)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Open / dicht")
+                            .font(.title3.weight(.semibold)).foregroundStyle(.white)
+                        Text("Opent als hij dicht is, sluit als hij open is")
+                            .font(.caption).foregroundStyle(.white.opacity(0.65))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(toggleColor.opacity(0.18)))
+            default:
+                VStack(spacing: 8) {
+                    ToggleGlyph(size: 52)
+                    Text("Open / dicht")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(toggleColor.opacity(0.18)))
+            }
+        }
+        .widgetURL(URL(string: "linkaplus://toggle"))
+        .widgetBackground(bgColor)
+    }
+}
+
 /// Medium: two buttons side by side (Link works per area in medium widgets).
 struct LinkaControlView: View {
     @Environment(\.widgetFamily) var family
@@ -112,9 +179,20 @@ private struct AccessoryBackgroundCircle: View {
     }
 }
 
+/// Kept under the original kind, so a widget already on the home screen turns
+/// into the single toggle button by itself after the update.
 struct LinkaControlWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "LinkaControl", provider: LinkaProvider()) { _ in LinkaControlView() }
+        StaticConfiguration(kind: "LinkaControl", provider: LinkaProvider()) { _ in LinkaToggleView() }
+            .configurationDisplayName("Slot open/dicht")
+            .description("Eén knop: opent als het slot dicht is, sluit als het open is.")
+            .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
+    }
+}
+
+struct LinkaDualWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "LinkaDual", provider: LinkaProvider()) { _ in LinkaControlView() }
             .configurationDisplayName("Slot openen & sluiten")
             .description("Twee knoppen: openen en sluiten.")
             .supportedFamilies([.systemMedium])
@@ -201,6 +279,7 @@ struct TrackingLiveActivity: Widget {
 struct LinkaWidgets: WidgetBundle {
     var body: some Widget {
         LinkaControlWidget()
+        LinkaDualWidget()
         LinkaUnlockWidget()
         LinkaLockWidget()
         if #available(iOS 16.1, *) { TrackingLiveActivity() }
