@@ -19,6 +19,7 @@ struct FirmwareView: View {
     var body: some View {
         NavigationStack {
             List {
+            Group {
                 Section("Jouw slot") {
                     row("Huidige firmware", ble.fwRevision ?? (ble.ready ? "uitlezen…" : "verbind via Bluetooth"))
                     if let cur = ble.fwRevision, let avail = info?.leo2_firmware_version {
@@ -72,7 +73,9 @@ struct FirmwareView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Firmware")
+            .listRowBackground(Theme.cardFill)
+        }
+            .linkaScreen().navigationTitle("Firmware")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Gereed") { dismiss() } } }
             .task { await load() }

@@ -142,7 +142,7 @@ struct LockDetailView: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
-        .navigationTitle(displayName)
+        .linkaScreen().navigationTitle(displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -537,7 +537,7 @@ struct LockDetailView: View {
                         description: "Zodra je het slot sluit terwijl je telefoon een locatie heeft, wordt die hier bewaard.")
                 }
             }
-            .navigationTitle("Geparkeerde fiets")
+            .linkaScreen().navigationTitle("Geparkeerde fiets")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Gereed") { showParkedSheet = false } }
@@ -566,7 +566,7 @@ struct LockDetailView: View {
                     }
                 }
             }
-            .navigationTitle(displayName)
+            .linkaScreen().navigationTitle(displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Gereed") { showFullMap = false } }
@@ -583,6 +583,7 @@ struct LockDetailView: View {
 
     private var settingsPage: some View {
         List {
+            Group {
             statusSection
             statusFlagsSection
 
@@ -606,7 +607,7 @@ struct LockDetailView: View {
                 }
                 NavigationLink {
                     List { dataplanSection }
-                        .navigationTitle("Dataplan").navigationBarTitleDisplayMode(.inline)
+                        .linkaScreen().navigationTitle("Dataplan").navigationBarTitleDisplayMode(.inline)
                 } label: { Label("Dataplan & verbruik", systemImage: "simcard") }
                 Button { showStats = true } label: {
                     HStack {
@@ -653,7 +654,9 @@ struct LockDetailView: View {
                 .padding(.top, 6)
             }
         }
-        .navigationTitle("Instellingen")
+            .listRowBackground(Theme.cardFill)
+        }
+        .linkaScreen().navigationTitle("Instellingen")
         .navigationBarTitleDisplayMode(.inline)
         .alert("Slot hernoemen", isPresented: $showRename) {
             TextField("Naam", text: $renameText)
@@ -689,10 +692,11 @@ struct LockDetailView: View {
 
     private var advancedPage: some View {
         List {
+            Group {
             Section {
                 NavigationLink {
                     List { sensorsSection }
-                        .navigationTitle("Sensoren").navigationBarTitleDisplayMode(.inline)
+                        .linkaScreen().navigationTitle("Sensoren").navigationBarTitleDisplayMode(.inline)
                 } label: { Label("Sensoren (live)", systemImage: "gauge.with.dots.needle.33percent") }
                 NavigationLink {
                     SlotSettingsPage(kind: .maintenance, ble: ble, serial: lock.serial_no)
@@ -701,7 +705,9 @@ struct LockDetailView: View {
             }
             geavanceerdSection
         }
-        .navigationTitle("Geavanceerd")
+            .listRowBackground(Theme.cardFill)
+        }
+        .linkaScreen().navigationTitle("Geavanceerd")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -766,6 +772,14 @@ struct LockDetailView: View {
             } label: {
                 LockGraphic(locked: barClosed, color: heroColor, size: size,
                             moving: ble.motion != nil, duration: ble.motorDuration)
+                    .background(
+                        // State-coloured glow, like the widget's.
+                        Circle()
+                            .fill(RadialGradient(colors: [heroColor.opacity(0.32), heroColor.opacity(0)],
+                                                 center: .center, startRadius: 0, endRadius: size * 0.8))
+                            .frame(width: size * 1.7, height: size * 1.7)
+                            .animation(.easeInOut(duration: 0.35), value: heroColor)
+                    )
                     .accessibilityHidden(true)
             }
             .buttonStyle(PressableStyle())
@@ -801,7 +815,7 @@ struct LockDetailView: View {
             }
             .foregroundStyle(ble.ready ? Color.primary : Color.secondary)
             .padding(.horizontal, 12).padding(.vertical, 7)
-            .background(Capsule().fill(Color(.secondarySystemBackground)))
+            .background(Capsule().fill(Theme.cardFill).overlay(Capsule().strokeBorder(Theme.cardStroke, lineWidth: 1)))
             .frame(minHeight: 44).contentShape(Rectangle())   // full-size tap target
         }
         .buttonStyle(.plain)
@@ -823,8 +837,7 @@ struct LockDetailView: View {
             statColumn("Afstand", distanceText ?? "–", "location.fill", Color.secondary)
         }
         .padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-            .fill(Color(.secondarySystemBackground)))
+        .background(GlassCard())
     }
 
     private func statColumn(_ title: String, _ value: String, _ icon: String, _ color: Color) -> some View {
@@ -1013,7 +1026,7 @@ struct LockDetailView: View {
             LockMapView(coordinate: coordinate, title: displayName, route: routePoints)
         } else {
             ZStack {
-                Color(.secondarySystemBackground)
+                Theme.cardFill
                 VStack(spacing: 6) {
                     Image(systemName: "mappin.slash").font(.title)
                     Text("Geen locatie bekend voor dit slot").font(.footnote)
@@ -1044,8 +1057,7 @@ struct LockDetailView: View {
                     .font(.title2).foregroundStyle(Theme.accent)
             }
             .padding(.vertical, 10).padding(.horizontal, 14)
-            .background(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .fill(Color(.secondarySystemBackground)))
+            .background(GlassCard())
         }
         .buttonStyle(.plain)
         .padding(.top, 8)

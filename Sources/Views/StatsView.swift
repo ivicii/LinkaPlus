@@ -126,11 +126,14 @@ struct StatsView: View {
     var body: some View {
         NavigationStack {
             List {
+            Group {
                 tilesSection
                 activitySection
                 batterySection
             }
-            .navigationTitle("Statistieken")
+            .listRowBackground(Theme.cardFill)
+        }
+            .linkaScreen().navigationTitle("Statistieken")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Gereed") { dismiss() } } }
             .navigationDestination(isPresented: $showActivityList) { activityListView }
@@ -139,13 +142,16 @@ struct StatsView: View {
 
     private var activityListView: some View {
         List {
+            Group {
             if events.isEmpty {
                 Text("Nog geen activiteiten.").foregroundStyle(.secondary)
             } else {
                 ForEach(events) { ActivityRow(activity: $0) }
             }
         }
-        .navigationTitle("Activiteiten")
+            .listRowBackground(Theme.cardFill)
+        }
+        .linkaScreen().navigationTitle("Activiteiten")
         .navigationBarTitleDisplayMode(.inline)
     }
 

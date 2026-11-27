@@ -133,6 +133,7 @@ struct SlotSettingsPage: View {
 
     var body: some View {
         List {
+            Group {
             if !connected {
                 Section {
                     Label("Niet verbonden — ga dichtbij je slot. Wijzigen kan pas als het slot verbonden is.",
@@ -142,7 +143,9 @@ struct SlotSettingsPage: View {
             }
             content
         }
-        .navigationTitle(title)
+            .listRowBackground(Theme.cardFill)
+        }
+        .linkaScreen().navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         // Result as a toast at the bottom: a row at the top pushed the whole list
         // down (and the control you were tapping away from under your finger).

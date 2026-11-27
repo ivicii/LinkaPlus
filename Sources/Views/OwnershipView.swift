@@ -27,6 +27,7 @@ struct OwnershipView: View {
 
     var body: some View {
         List {
+            Group {
             Section {
                 TextField("E-mail nieuwe eigenaar", text: $email)
                     .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -67,7 +68,9 @@ struct OwnershipView: View {
             if busy { Section { HStack { ProgressView(); Text(step ?? "Bezig…") } } }
             if let message { Section { Text(message).font(.callout).foregroundStyle(Theme.danger) } }
         }
-        .navigationTitle("Eigendom wijzigen")
+            .listRowBackground(Theme.cardFill)
+        }
+        .linkaScreen().navigationTitle("Eigendom wijzigen")
         .navigationBarTitleDisplayMode(.inline)
         // Leaving halfway through a transfer/removal would hide its outcome.
         .navigationBarBackButtonHidden(busy)

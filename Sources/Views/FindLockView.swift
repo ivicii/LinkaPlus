@@ -133,7 +133,7 @@ struct FindLockView: View {
                 }
             }
             .background(tint.opacity(0.12).ignoresSafeArea())
-            .navigationTitle("Zoek je slot")
+            .linkaScreen().navigationTitle("Zoek je slot")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Gereed") { dismiss() } } }
         }

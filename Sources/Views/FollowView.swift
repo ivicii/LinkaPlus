@@ -30,7 +30,7 @@ struct FollowView: View {
             }
             panel
         }
-        .navigationTitle("Volg je fiets")
+        .linkaScreen().navigationTitle("Volg je fiets")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             eng.start(serial: serial, lockName: lockName, auth: session.identity())

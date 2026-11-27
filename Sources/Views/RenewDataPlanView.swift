@@ -22,6 +22,7 @@ struct RenewDataPlanView: View {
     var body: some View {
         NavigationStack {
             List {
+            Group {
                 Section {
                     if loading {
                         HStack { ProgressView(); Text("Betaalgegevens laden…") }
@@ -55,7 +56,9 @@ struct RenewDataPlanView: View {
                     Text("Betaling verloopt veilig via Stripe. Na succesvolle betaling wordt het dataplan geactiveerd en werken live tracking en remote sirene weer.")
                 }
             }
-            .navigationTitle("Verlengen")
+            .listRowBackground(Theme.cardFill)
+        }
+            .linkaScreen().navigationTitle("Verlengen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {

@@ -16,6 +16,7 @@ struct DiagnosticsView: View {
     var body: some View {
         NavigationStack {
             List {
+            Group {
                 Section {
                     Button(busy ? "Bezig…" : "Diagnose uitvoeren") { run() }
                         .disabled(busy)
@@ -57,7 +58,9 @@ struct DiagnosticsView: View {
                     }
                 }
             }
-            .navigationTitle("API-diagnose")
+            .listRowBackground(Theme.cardFill)
+        }
+            .linkaScreen().navigationTitle("API-diagnose")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {

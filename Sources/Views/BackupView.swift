@@ -33,6 +33,7 @@ struct BackupView: View {
 
     var body: some View {
         List {
+            Group {
             Section {
                 Text("Je toegangssleutels leven nu alleen in deze telefoon en in LINKA's cloud. Met een back-up kun je je slot blijven bedienen als die cloud wegvalt of je telefoon kwijtraakt. Het bestand is versleuteld met een wachtwoord — bewaar dat los (bijv. in je wachtwoordmanager).")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -65,7 +66,9 @@ struct BackupView: View {
                 }
             }
         }
-        .navigationTitle("Back-up & herstel")
+            .listRowBackground(Theme.cardFill)
+        }
+        .linkaScreen().navigationTitle("Back-up & herstel")
         .navigationBarTitleDisplayMode(.inline)
         .fileExporter(isPresented: $showExporter,
                       document: exportDoc,

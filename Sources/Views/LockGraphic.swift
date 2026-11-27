@@ -22,11 +22,11 @@ struct LockGraphic: View {
     // Calm neutral ring — dark charcoal on light, soft graphite on dark. Never a
     // stark white, so it reads like the real black lock body in both themes.
     private static let ringBase = Color(UIColor { t in
-        t.userInterfaceStyle == .dark ? UIColor(red: 0.290, green: 0.290, blue: 0.322, alpha: 1)
+        t.userInterfaceStyle == .dark ? UIColor(red: 0.290, green: 0.330, blue: 0.430, alpha: 1)
                                       : UIColor(red: 0.149, green: 0.149, blue: 0.169, alpha: 1)
     })
     private static let ringTop = Color(UIColor { t in
-        t.userInterfaceStyle == .dark ? UIColor(red: 0.354, green: 0.354, blue: 0.392, alpha: 1)
+        t.userInterfaceStyle == .dark ? UIColor(red: 0.400, green: 0.450, blue: 0.570, alpha: 1)
                                       : UIColor(red: 0.182, green: 0.182, blue: 0.206, alpha: 1)
     })
 

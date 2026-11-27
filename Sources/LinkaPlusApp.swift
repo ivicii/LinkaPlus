@@ -10,6 +10,7 @@ struct LinkaPlusApp: App {
         WindowGroup {
             RootView()
                 .tint(Theme.accent)
+                .preferredColorScheme(.dark)   // the navy design is a dark design
                 .onAppear { WatchBridge.shared.activate() }
                 .environmentObject(session)
                 .environmentObject(router)

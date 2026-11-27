@@ -35,6 +35,7 @@ struct LockListView: View {
                     }
                 } else {
                     List {
+            Group {
                         if sessionExpired {
                             Section {
                                 Label("Je sessie lijkt verlopen — dit zijn opgeslagen gegevens. Bluetooth-bediening werkt nog.",
@@ -57,10 +58,12 @@ struct LockListView: View {
                             }
                         }
                     }
+            .listRowBackground(Theme.cardFill)
+        }
                     .refreshable { await load() }
                 }
             }
-            .navigationTitle("Mijn sloten")
+            .linkaScreen().navigationTitle("Mijn sloten")
             .navigationDestination(for: Lock.self) { lock in
                 LockDetailView(lock: lock)
             }

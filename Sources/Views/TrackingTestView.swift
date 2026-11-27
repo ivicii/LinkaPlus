@@ -69,6 +69,7 @@ struct TrackingTestView: View {
 
     var body: some View {
         List {
+            Group {
             if let last = points.last {
                 Section {
                     LockMapView(coordinate: last, title: "Laatste positie", route: points)
@@ -182,7 +183,9 @@ struct TrackingTestView: View {
                 }
             }
         }
-        .navigationTitle("Tracking (recovery)")
+            .listRowBackground(Theme.cardFill)
+        }
+        .linkaScreen().navigationTitle("Tracking (recovery)")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { restore() }
         .onDisappear { loop?.cancel(); armLoop?.cancel() }

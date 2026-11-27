@@ -14,6 +14,7 @@ struct AddLockView: View {
     var body: some View {
         NavigationStack {
             List {
+            Group {
                 if !pc.busy && pc.steps.isEmpty {
                     Section {
                         if pc.found.isEmpty {
@@ -73,7 +74,9 @@ struct AddLockView: View {
                     }
                 }
             }
-            .navigationTitle("Slot toevoegen")
+            .listRowBackground(Theme.cardFill)
+        }
+            .linkaScreen().navigationTitle("Slot toevoegen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

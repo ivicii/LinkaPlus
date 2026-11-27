@@ -11,6 +11,7 @@ struct BLEDiagnosticsView: View {
     var body: some View {
         NavigationStack {
             List {
+            Group {
                 Section {
                     HStack {
                         Text("Status").bold()
@@ -75,7 +76,9 @@ struct BLEDiagnosticsView: View {
                     }
                 }
             }
-            .navigationTitle("Bluetooth-diagnose")
+            .listRowBackground(Theme.cardFill)
+        }
+            .linkaScreen().navigationTitle("Bluetooth-diagnose")
             .navigationBarTitleDisplayMode(.inline)
             // Also when the sheet is swiped away: don't leave a scan running.
             .onDisappear { ble.stop() }

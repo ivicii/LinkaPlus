@@ -18,6 +18,7 @@ struct BLEControlView: View {
     var body: some View {
         NavigationStack {
             List {
+            Group {
                 Section {
                     HStack { Text("Status").bold(); Spacer(); Text(ble.state).foregroundStyle(.secondary) }
                     VStack(alignment: .leading, spacing: 2) {
@@ -93,7 +94,9 @@ struct BLEControlView: View {
                     }
                 }
             }
-            .navigationTitle("Bediening (BLE)")
+            .listRowBackground(Theme.cardFill)
+        }
+            .linkaScreen().navigationTitle("Bediening (BLE)")
             .navigationBarTitleDisplayMode(.inline)
             // The test knobs live on the shared controller: put them back, or every
             // later command (settings, widgets) would use this channel/offset too.

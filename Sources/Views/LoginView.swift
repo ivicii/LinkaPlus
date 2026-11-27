@@ -83,6 +83,8 @@ struct LoginView: View {
                 }
                 Spacer()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .linkaScreen()
             .padding()
             .frame(maxWidth: 480)             // keeps the form readable on iPad / landscape
             .frame(maxWidth: .infinity)

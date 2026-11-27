@@ -10,6 +10,7 @@ struct TrackingHistoryView: View {
 
     var body: some View {
         List {
+            Group {
             if sessions.isEmpty {
                 Text("Nog geen tracking-sessies opgeslagen. Zodra je tracking gebruikt, verschijnt elke sessie hier met z'n eigen kaart.")
                     .font(.callout).foregroundStyle(.secondary)
@@ -31,7 +32,9 @@ struct TrackingHistoryView: View {
                 }
             }
         }
-        .navigationTitle("Tracking-geschiedenis")
+            .listRowBackground(Theme.cardFill)
+        }
+        .linkaScreen().navigationTitle("Tracking-geschiedenis")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { if !sessions.isEmpty { EditButton() } }
         .onAppear { sessions = TrackingHistory.all(serial: serial) }
@@ -55,6 +58,7 @@ struct TrackingSessionDetailView: View {
 
     var body: some View {
         List {
+            Group {
             if !locs.isEmpty {
                 Section {
                     SessionMapView(points: locs,
@@ -133,7 +137,9 @@ struct TrackingSessionDetailView: View {
                 }
             }
         }
-        .navigationTitle(TrackingHistoryView.rangeText(session))
+            .listRowBackground(Theme.cardFill)
+        }
+        .linkaScreen().navigationTitle(TrackingHistoryView.rangeText(session))
         .navigationBarTitleDisplayMode(.inline)
     }
 

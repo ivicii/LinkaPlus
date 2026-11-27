@@ -16,6 +16,7 @@ struct SharingView: View {
     var body: some View {
         NavigationStack {
             List {
+            Group {
                 Section("Toegang") {
                     if loading && people.isEmpty {
                         HStack { ProgressView(); Text("Laden…").foregroundStyle(.secondary) }
@@ -57,7 +58,9 @@ struct SharingView: View {
 
                 if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
             }
-            .navigationTitle("Delen")
+            .listRowBackground(Theme.cardFill)
+        }
+            .linkaScreen().navigationTitle("Delen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Gereed") { dismiss() } } }
             .task { await load() }
