@@ -1,7 +1,8 @@
 import AppIntents
 
 /// Shortcuts / Action-button / Siri action to unlock the lock.
-/// Opens the app (reliable Bluetooth path) and the app auto-unlocks.
+/// Opens the app (reliable Bluetooth path) and hands the request straight to the
+/// router; the lock screen carries it out as soon as Bluetooth is ready.
 @available(iOS 16.0, *)
 struct UnlockLockIntent: AppIntent {
     static var title: LocalizedStringResource = "Ontgrendel slot"
@@ -10,7 +11,7 @@ struct UnlockLockIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        AppRouter.setPending(AppRouter.pendingKey)
+        AppRouter.shared.requestUnlock()
         return .result()
     }
 }
@@ -24,7 +25,7 @@ struct LockLockIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        AppRouter.setPending(AppRouter.pendingLockKey)
+        AppRouter.shared.requestLock()
         return .result()
     }
 }
@@ -38,7 +39,7 @@ struct ToggleLockIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        AppRouter.setPending(AppRouter.pendingToggleKey)
+        AppRouter.shared.requestToggle()
         return .result()
     }
 }

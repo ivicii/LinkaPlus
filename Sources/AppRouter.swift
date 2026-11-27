@@ -2,6 +2,15 @@ import SwiftUI
 
 /// App-wide router for deep links / intents / widgets: "open" or "close" the lock now.
 final class AppRouter: ObservableObject {
+    /// One router for the whole app, so App Intents (Action button, Siri,
+    /// Shortcuts) can hand their request over directly instead of via a flag
+    /// that was read at the wrong moment.
+    static let shared = AppRouter()
+
+    /// Bumped on every new request, so a second press is noticed even when an
+    /// earlier request is still pending (unlockRequested would stay `true`).
+    @Published var requestSeq = 0
+
     /// An action is pending (kept under this name so existing observers still work).
     @Published var unlockRequested = false
     /// true = the pending action is LOCK, false = UNLOCK.
@@ -34,6 +43,7 @@ final class AppRouter: ObservableObject {
         let stamp = Date()
         requestedAt = stamp
         unlockRequested = true
+        requestSeq &+= 1
         // Clear the flag when it expires, instead of whenever someone next looks.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.requestLifetime) { [weak self] in
             guard let self, self.requestedAt == stamp else { return }

@@ -87,10 +87,10 @@ struct LockListView: View {
                 }
             }
             .task { await load() }
-            .onChange(of: router.unlockRequested) { req in
+            .onChange(of: router.requestSeq) { _ in
                 // Only from the list itself: don't yank the user away from a lock
                 // (or its settings) they are looking at — that screen handles it.
-                if req, path.isEmpty, let first = locks.first { path = [first] }
+                if router.unlockRequested, path.isEmpty, let first = locks.first { path = [first] }
             }
             .onChange(of: router.lockRemoved) { _ in
                 path = []

@@ -51,6 +51,7 @@ struct LockDetailView: View {
         }
     }
 
+    @State private var lastStatePing = Date.distantPast
     private var liveLocked: Bool { ble.liveLocked ?? lock.is_locked ?? true }
 
     /// The lock state we actually know from Bluetooth (nil = not yet known).
@@ -175,6 +176,7 @@ struct LockDetailView: View {
         .onChange(of: ble.liveLocked) { v in
             guard let v else { return }
             heroLocked = v
+            maybeAutoUnlock()   // a pending toggle was waiting for this state
             if lastKnownLock != nil, lastKnownLock != v {
                 UIAccessibility.post(notification: .announcement, argument: v ? "Slot vergrendeld" : "Slot ontgrendeld")
             }
@@ -220,7 +222,7 @@ struct LockDetailView: View {
             }
         }
         .onChange(of: ble.ctxCounter) { _ in maybeAutoUnlock() }
-        .onChange(of: router.unlockRequested) { _ in maybeAutoUnlock() }
+        .onChange(of: router.requestSeq) { _ in maybeAutoUnlock() }
         .refreshable {
             await load()
             await syncRecoveryState()
@@ -943,8 +945,15 @@ struct LockDetailView: View {
         guard router.hasFreshRequest(), ble.ready, ble.ctxCounter != nil else { return }
         var lockIt = router.wantsLock
         if router.wantsToggle {
-            // Wait until the lock has reported its real state (status frame).
-            guard let state = ble.liveLocked else { return }
+            // Wait until the lock has reported its real state (status frame);
+            // ask for it instead of hoping one arrives on its own.
+            guard let state = ble.liveLocked else {
+                if Date().timeIntervalSince(lastStatePing) > 3 {
+                    lastStatePing = Date()
+                    ble.statePing()
+                }
+                return
+            }
             lockIt = !state
         }
         router.cancelRequest()

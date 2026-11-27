@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct LinkaPlusApp: App {
     @StateObject private var session = SessionStore()
-    @StateObject private var router = AppRouter()
+    @StateObject private var router = AppRouter.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
