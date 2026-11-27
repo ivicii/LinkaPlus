@@ -71,20 +71,74 @@ private struct ActionTile: View {
 
 private let toggleColor = Color(red: 0.20, green: 0.52, blue: 1.0)
 
-/// One button that does what the Action button does: open when locked, close
-/// when open. The widget can't see the lock, so the app decides on tap.
+private let tgOrange = Color(red: 1.00, green: 0.60, blue: 0.18)
+private let tgGreen  = Color(red: 0.17, green: 0.83, blue: 0.42)
+private let tgBackground = LinearGradient(
+    colors: [Color(red: 0.141, green: 0.216, blue: 0.373),
+             Color(red: 0.075, green: 0.110, blue: 0.212),
+             Color(red: 0.040, green: 0.059, blue: 0.118)],
+    startPoint: .topLeading, endPoint: .bottomTrailing)
+
+private extension View {
+    /// iOS 17 adds widget content margins itself; iOS 16 needs them by hand.
+    @ViewBuilder func legacyWidgetPadding() -> some View {
+        if #available(iOS 17.0, *) { self } else { self.padding(14) }
+    }
+}
+
+/// LINKA ring with an orange→green gradient (open ↔ closed), white shackle and a
+/// small "swap" badge. One button that does what the Action button does: open
+/// when locked, close when open. The widget can't see the lock; the app decides.
 private struct ToggleGlyph: View {
     var size: CGFloat
     var body: some View {
-        MiniLock(locked: false, color: toggleColor, size: size)
-            .overlay(alignment: .bottomTrailing) {
+        let r = size * 0.38, t = size * 0.15
+        let ex = r * sin(34 * .pi / 180), ey = r * cos(34 * .pi / 180)
+        let barH = t * 0.78
+        let b = size * 0.36
+        ZStack {
+            // Stroke gradient is applied before the 90° turn: bottom→top here
+            // ends up left (orange) → right (green) on screen.
+            Circle().trim(from: 0.0944, to: 0.9056)
+                .stroke(LinearGradient(colors: [tgOrange, tgGreen], startPoint: .bottom, endPoint: .top),
+                        style: StrokeStyle(lineWidth: t, lineCap: .round))
+                .rotationEffect(.degrees(90))
+                .frame(width: r * 2, height: r * 2)
+            Circle().fill(.white).frame(width: t * 0.52, height: t * 0.52)
+            Capsule().fill(.white.opacity(0.92))
+                .frame(width: ex * 2 + barH, height: barH)
+                .offset(y: ey)
+        }
+        .frame(width: size, height: size)
+        .background(
+            Circle()
+                .fill(RadialGradient(colors: [toggleColor.opacity(0.55), toggleColor.opacity(0)],
+                                     center: .center, startRadius: 0, endRadius: size * 0.95))
+                .frame(width: size * 2, height: size * 2)
+        )
+        .overlay(alignment: .topTrailing) {
+            ZStack {
+                Circle().fill(Color(red: 0.063, green: 0.094, blue: 0.188)).frame(width: b + 6, height: b + 6)
+                Circle()
+                    .fill(LinearGradient(colors: [Color(red: 0.35, green: 0.63, blue: 1.0),
+                                                  Color(red: 0.18, green: 0.42, blue: 1.0)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: b, height: b)
                 Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: size * 0.26, weight: .bold))
+                    .font(.system(size: b * 0.5, weight: .bold))
                     .foregroundStyle(.white)
-                    .padding(size * 0.08)
-                    .background(Circle().fill(toggleColor))
-                    .offset(x: size * 0.06, y: size * 0.04)
             }
+            .offset(x: size * 0.07, y: -size * 0.05)
+        }
+    }
+}
+
+private struct WidgetCaption: View {
+    var body: some View {
+        Text("LINKA")
+            .font(.system(size: 11, weight: .bold))
+            .tracking(1.6)
+            .foregroundStyle(.white.opacity(0.5))
     }
 }
 
@@ -108,31 +162,50 @@ struct LinkaToggleView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             case .systemMedium:
-                HStack(spacing: 18) {
-                    ToggleGlyph(size: 64)
-                    VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 22) {
+                    ToggleGlyph(size: 88).padding(.leading, 6)
+                    VStack(alignment: .leading, spacing: 2) {
+                        WidgetCaption()
                         Text("Open / dicht")
-                            .font(.title3.weight(.semibold)).foregroundStyle(.white)
-                        Text("Opent als hij dicht is, sluit als hij open is")
-                            .font(.caption).foregroundStyle(.white.opacity(0.65))
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1).minimumScaleFactor(0.7)
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 18)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(toggleColor.opacity(0.18)))
+                .legacyWidgetPadding()
             default:
-                VStack(spacing: 8) {
-                    ToggleGlyph(size: 52)
+                VStack(spacing: 0) {
+                    HStack { WidgetCaption(); Spacer() }
+                    Spacer(minLength: 0)
+                    ToggleGlyph(size: 74)
+                    Spacer(minLength: 0)
                     Text("Open / dicht")
-                        .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1).minimumScaleFactor(0.8)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(toggleColor.opacity(0.18)))
+                .legacyWidgetPadding()
             }
         }
         .widgetURL(URL(string: "linkaplus://toggle"))
-        .widgetBackground(bgColor)
+        .modifier(ToggleBackground(family: family))
+    }
+}
+
+/// Fancy gradient for the home-screen sizes; lock-screen accessories keep the
+/// system's own tinted look.
+private struct ToggleBackground: ViewModifier {
+    let family: WidgetFamily
+    func body(content: Content) -> some View {
+        switch family {
+        case .accessoryCircular, .accessoryRectangular:
+            content.widgetBackground(Color.clear)
+        default:
+            content.widgetBackground(tgBackground)
+        }
     }
 }
 
