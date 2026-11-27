@@ -41,6 +41,11 @@ struct LockDetailView: View {
     @State private var localActs: [LockActivity] = []
     @State private var lastKnownLock: Bool?
     @State private var parked: ParkedStore.Spot?
+    /// .onClose: the lock just closed → store the phone's position.
+    /// .verify: connected to a lock that is already closed → store only if the saved
+    /// spot is clearly elsewhere (closed with the button, or app wasn't connected).
+    private enum ParkCapture { case none, onClose, verify }
+    @State private var parkCapture: ParkCapture = .none
 
     /// Cloud feed + locally recorded events (cloud is rarely updated now).
     private var allActivities: [LockActivity] {
@@ -109,8 +114,11 @@ struct LockDetailView: View {
         return prefix + "via Bluetooth"
     }
 
-    /// Best known coordinate: the lock's own, else the most recent located activity.
+    /// Best known coordinate: the parked spot, else the lock's cloud location,
+    /// else the most recent located activity.
     private var coordinate: CLLocationCoordinate2D? {
+        // Parked = where the lock was closed: that is the bike's place.
+        if let p = parked { return p.coordinate }
         if lock.hasLocation, let lat = lock.latitude, let lon = lock.longitude {
             return CLLocationCoordinate2D(latitude: lat, longitude: lon)
         }
@@ -122,14 +130,13 @@ struct LockDetailView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // Everything on one screen: map, parked card, stats and buttons keep
+            // Everything on one screen: map, stats and buttons keep
             // their natural size and the lock takes whatever height is left.
             // With accessibility text sizes the page grows and scrolls instead.
             let fit = !dynamicTypeSize.isAccessibilitySize
             ScrollView {
                 VStack(spacing: 0) {
                     compactMap
-                    if let parked { parkedCard(parked) }
                     heroControl(fill: fit)
                         .padding(.vertical, 8)
                         .frame(maxHeight: fit ? .infinity : nil)
@@ -169,6 +176,7 @@ struct LockDetailView: View {
             let mine = lock.serial_no.map { ble.currentSerial?.caseInsensitiveCompare($0) == .orderedSame } ?? false
             lastKnownLock = mine ? ble.liveLocked : nil
             heroLocked = lastKnownLock ?? lock.is_locked ?? true
+            if lastKnownLock == true { parkCapture = .verify; captureParkedIfNeeded() }
             loc.start()
             await startBLE()
             await load()
@@ -187,16 +195,17 @@ struct LockDetailView: View {
                 LocalActivityLog.record(kind: v ? "close" : "open", battery: ble.batteryLevelBLE, serial: lock.serial_no)
                 localActs = LocalActivityLog.load(serial: lock.serial_no)
                 // Lock just closed → remember where the bike is parked (phone's GPS).
-                // Only a fresh fix: after returning to the app the last known
-                // position can still be the previous place.
-                if v, let here = loc.coordinate, let fix = loc.fixDate, Date().timeIntervalSince(fix) < 120 {
-                    ParkedStore.save(here, accuracy: loc.accuracy, serial: lock.serial_no)
-                    parked = ParkedStore.load(serial: lock.serial_no)
-                }
+                parkCapture = v ? .onClose : .none
+            } else if lastKnownLock == nil, v {
+                // First state after connecting, and it's closed: make sure the
+                // parked spot is here (it may have been closed with the button).
+                parkCapture = .verify
             }
+            captureParkedIfNeeded()
             lastKnownLock = v
             maybeAutoUnlock()
         }
+        .onReceive(loc.$coordinate) { _ in captureParkedIfNeeded() }
         .onChange(of: ble.batteryLevelBLE) { b in
             guard let b else { return }
             let last = LocalActivityLog.lastTimestamp(kind: "battery", serial: lock.serial_no)
@@ -864,7 +873,7 @@ struct LockDetailView: View {
     }
 
     private var compactMap: some View {
-        Button { showFullMap = true } label: {
+        Button { if parked != nil { showParkedSheet = true } else { showFullMap = true } } label: {
             mapView
                 .allowsHitTesting(false)
                 .frame(height: 128)
@@ -878,8 +887,14 @@ struct LockDetailView: View {
                         .padding(8)
                 }
                 .overlay(alignment: .bottomLeading) {
-                    if let d = lastLocationDate {
-                        Label(DateUtils.relative(d), systemImage: "clock")
+                    if let p = parked {
+                        Label("Geparkeerd · \(DateUtils.relative(p.date))", systemImage: "parkingsign.circle.fill")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(8)
+                    } else if let d = lastLocationDate {
+                        Label("Laatst gemeld door slot · \(DateUtils.relative(d))", systemImage: "antenna.radiowaves.left.and.right")
                             .font(.caption2)
                             .padding(.horizontal, 8).padding(.vertical, 4)
                             .background(.ultraThinMaterial, in: Capsule())
@@ -888,7 +903,7 @@ struct LockDetailView: View {
                 }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Kaart vergroten")
+        .accessibilityLabel(parked != nil ? "Parkeerplek openen" : "Kaart vergroten")
     }
 
     @ViewBuilder
@@ -1046,6 +1061,22 @@ struct LockDetailView: View {
                 }
             }
         }
+    }
+
+    /// Store the phone's position as the parked spot once it has a fresh fix,
+    /// while we're connected (so the phone is next to the bike) and it's closed.
+    private func captureParkedIfNeeded() {
+        guard parkCapture != .none, ble.ready, ble.liveLocked == true,
+              let here = loc.coordinate, let fix = loc.fixDate,
+              Date().timeIntervalSince(fix) < 120 else { return }
+        if parkCapture == .verify, let p = parked {
+            let d = CLLocation(latitude: p.lat, longitude: p.lon)
+                .distance(from: CLLocation(latitude: here.latitude, longitude: here.longitude))
+            if d <= 75 { parkCapture = .none; return }   // saved spot is right here
+        }
+        ParkedStore.save(here, accuracy: loc.accuracy, serial: lock.serial_no)
+        parked = ParkedStore.load(serial: lock.serial_no)
+        parkCapture = .none
     }
 
     @ViewBuilder
